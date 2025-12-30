@@ -1,5 +1,10 @@
 # RudraPay - Offline Digital Wallet System
 
+---
+
+
+
+
 <div align="center">
 
 ![RudraPay Logo](https://img.shields.io/badge/RudraPay-Digital%20Wallet-blue?style=for-the-badge)
@@ -36,6 +41,18 @@
 ## 🌟 Overview
 
 RudraPay is an innovative **offline-first digital wallet** that enables peer-to-peer token transfers using **Classic Bluetooth (RFCOMM)** without requiring an internet connection. The system consists of a Flutter mobile application and a Node.js backend API for token generation and validation.
+
+## 🧪 Download APK (Beta)
+
+> ⚠️ Beta release — for testing only. Expect bugs and unfinished flows.
+
+🔽 **Download RudraPay Beta APK**  
+👉 [RudraPay-Beta.apk](https://drive.google.com/file/d/1-L6RaeMQv2S56zwle9rVU_uSsheyFCVf/view)
+
+**Notes**
+- Android only (Bluetooth needs real devices)
+- Enable “Install from unknown sources”
+- Use this build for testing — not production
 
 ### Key Innovation
 
