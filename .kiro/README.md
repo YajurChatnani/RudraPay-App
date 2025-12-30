@@ -67,15 +67,15 @@ RudraPay is an innovative **offline-first digital wallet** that enables peer-to-
 ## 📸 App Screenshots
 
 <p align="center">
-  <img src=".kiro/Screenshots/HomeScreen.jpg" width="220"/>
-  <img src=".kiro/Screenshots/EnterAmount.jpg" width="220"/>
-  <img src=".kiro/Screenshots/PaymentConfirm.jpg" width="220"/>
+  <img src="Screenshots/HomeScreen.jpg" width="220"/>
+  <img src="Screenshots/EnterAmount.jpg" width="220"/>
+  <img src="Screenshots/PaymentConfirm.jpg" width="220"/>
 </p>
 
 <p align="center">
-  <img src=".kiro/Screenshots/Scanning.jpg" width="220"/>
-  <img src=".kiro/Screenshots/ReadyToReceive.jpg" width="220"/>
-  <img src=".kiro/Screenshots/CreateAccount.jpg" width="220"/>
+  <img src="Screenshots/Scanning.jpg" width="220"/>
+  <img src="Screenshots/ReadyToReceive.jpg" width="220"/>
+  <img src="Screenshots/CreateAccount.jpg" width="220"/>
 </p>
 
 <p align="center">
