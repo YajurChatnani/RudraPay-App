@@ -1,18 +1,26 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../../../core/config/app_config.dart';
+import '../../../core/errors/app_exception.dart';
 import '../models/recharge_response.dart';
 
 class WalletService {
-  static const String _baseUrl = 'https://wallet-api-77kp.onrender.com/api/wallet';
-  static const String _userId = 'USER_TEST'; // Constant user ID for now
+  static final _config = AppConfig();
 
   /// Recharge wallet with free tokens
   /// [amount] - The amount/number of tokens to recharge
   /// Returns [RechargeResponse] on success
-  /// Throws exception on error
+  /// Throws [AppException] on error
   static Future<RechargeResponse> rechargeWallet(int amount) async {
     try {
-      final url = Uri.parse('$_baseUrl/recharge?userId=$_userId&amount=$amount');
+      // Validate configuration
+      if (!_config.isConfigured) {
+        throw AppException.config(_config.configError);
+      }
+
+      final baseUrl = _config.apiBaseUrl;
+      final userId = _config.userId;
+      final url = Uri.parse('$baseUrl/recharge?userId=$userId&amount=$amount');
 
       final response = await http.post(
         url,
@@ -20,8 +28,8 @@ class WalletService {
           'Content-Type': 'application/json',
         },
       ).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw Exception('Request timeout. Please try again.'),
+        Duration(seconds: _config.apiTimeout),
+        onTimeout: () => throw AppException.timeout(null),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -29,22 +37,24 @@ class WalletService {
         return RechargeResponse.fromJson(jsonResponse);
       } else if (response.statusCode == 400) {
         final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
-        throw Exception(
+        throw AppException.badRequest(
           jsonResponse['message'] ?? 'Invalid request. Please check the amount.',
         );
       } else if (response.statusCode == 401) {
-        throw Exception('Unauthorized. Please login again.');
+        throw AppException.unauthorized(null);
       } else if (response.statusCode == 500) {
-        throw Exception('Server error. Please try again later.');
+        throw AppException.server(null);
       } else {
-        throw Exception(
+        throw AppException.unknown(
           'Failed to recharge. Error code: ${response.statusCode}',
         );
       }
+    } on AppException {
+      rethrow;
     } on http.ClientException catch (e) {
-      throw Exception('Network error: ${e.message}');
+      throw AppException.network('Network error: ${e.message}');
     } catch (e) {
-      throw Exception(e.toString());
+      throw AppException.unknown(e.toString());
     }
   }
 }

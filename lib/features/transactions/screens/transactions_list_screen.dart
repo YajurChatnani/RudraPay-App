@@ -1,8 +1,38 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../balance/services/transaction_storage_service.dart';
 
-class TransactionsListScreen extends StatelessWidget {
+class TransactionsListScreen extends StatefulWidget {
   const TransactionsListScreen({super.key});
+
+  @override
+  State<TransactionsListScreen> createState() => _TransactionsListScreenState();
+}
+
+class _TransactionsListScreenState extends State<TransactionsListScreen> {
+  List<Map<String, dynamic>> _transactions = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTransactions();
+  }
+
+  Future<void> _loadTransactions() async {
+    try {
+      final unsettled = await TransactionStorageService.getUnsettledTransactions();
+      setState(() {
+        _transactions = unsettled;
+        _loading = false;
+      });
+    } catch (e) {
+      print('[TRANSACTIONS] Error loading: $e');
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,257 +86,83 @@ class TransactionsListScreen extends StatelessWidget {
 
             // ---------------- LIST ----------------
             Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _MonthCard(
-                    month: 'December 2025',
-                    items: [
-                      TransactionItem(
-                        name: 'CafeX Store',
-                        initials: 'CS',
-                        amount: '-₹320',
-                        date: 'Dec 24',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
+              child: _loading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFFE8FF3C),
+                        strokeWidth: 2,
                       ),
-                      TransactionItem(
-                        name: 'Priya Sharma',
-                        initials: 'PS',
-                        amount: '+₹500',
-                        date: 'Dec 23',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Aman Verma',
-                        initials: 'AV',
-                        amount: '-₹150',
-                        date: 'Dec 22',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
-                      ),
-                      TransactionItem(
-                        name: 'Wallet Top-up',
-                        initials: 'WB',
-                        amount: '+₹2,000',
-                        date: 'Dec 20',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Local Store',
-                        initials: 'LS',
-                        amount: '-₹780',
-                        date: 'Dec 18',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Rahul Mehta',
-                        initials: 'RM',
-                        amount: '+₹1,200',
-                        date: 'Dec 15',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Metro Tickets',
-                        initials: 'MT',
-                        amount: '-₹80',
-                        date: 'Dec 13',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Online Refund',
-                        initials: 'OR',
-                        amount: '+₹450',
-                        date: 'Dec 12',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Grocer Mart',
-                        initials: 'GM',
-                        amount: '-₹640',
-                        date: 'Dec 10',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
-                      ),
-                      TransactionItem(
-                        name: 'Movie Tickets',
-                        initials: 'MV',
-                        amount: '-₹520',
-                        date: 'Dec 08',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Cashback Credit',
-                        initials: 'CB',
-                        amount: '+₹120',
-                        date: 'Dec 06',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Zara Outlet',
-                        initials: 'ZO',
-                        amount: '-₹1,450',
-                        date: 'Dec 05',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
-                      ),
-                      TransactionItem(
-                        name: 'Pharmacy',
-                        initials: 'PH',
-                        amount: '-₹230',
-                        date: 'Dec 03',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                    ],
-                  ),
-                  _MonthCard(
-                    month: 'November 2025',
-                    items: [
-                      TransactionItem(
-                        name: 'Fuel Station',
-                        initials: 'FS',
-                        amount: '-₹1,120',
-                        date: 'Nov 29',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Freelance Payout',
-                        initials: 'FP',
-                        amount: '+₹9,500',
-                        date: 'Nov 28',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Utility Bill',
-                        initials: 'UB',
-                        amount: '-₹980',
-                        date: 'Nov 25',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Gym Membership',
-                        initials: 'GY',
-                        amount: '-₹1,800',
-                        date: 'Nov 20',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
-                      ),
-                      TransactionItem(
-                        name: 'Rohan Patil',
-                        initials: 'RP',
-                        amount: '+₹600',
-                        date: 'Nov 18',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Book Store',
-                        initials: 'BS',
-                        amount: '-₹340',
-                        date: 'Nov 15',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Coffee Bar',
-                        initials: 'CB',
-                        amount: '-₹210',
-                        date: 'Nov 12',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Wallet Top-up',
-                        initials: 'WT',
-                        amount: '+₹1,500',
-                        date: 'Nov 10',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Airport Cab',
-                        initials: 'AC',
-                        amount: '-₹760',
-                        date: 'Nov 08',
-                        status: 'SETTLED',
-                        pending: false,
-                      ),
-                      TransactionItem(
-                        name: 'Concert Tickets',
-                        initials: 'CT',
-                        amount: '-₹2,400',
-                        date: 'Nov 03',
-                        status: 'PENDING SETTLEMENT',
-                        pending: true,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                    )
+                  : _transactions.isEmpty
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(32),
+                            child: Text(
+                              'No transactions yet',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: _transactions.length,
+                          itemBuilder: (context, index) {
+                            final txn = _transactions[index];
+                            final merchant = txn['merchant'] as String? ?? 'Unknown';
+                            final amount = txn['amount'] as int? ?? 0;
+                            final type = txn['type'] as String? ?? 'debit';
+                            final timestamp = txn['timestamp'] as String? ?? '';
+                            final isCredit = type == 'credit';
+
+                            // Format date
+                            String dateStr = 'Just now';
+                            try {
+                              final dt = DateTime.parse(timestamp);
+                              dateStr = '${_monthName(dt.month)} ${dt.day}';
+                            } catch (e) {
+                              // Keep default
+                            }
+
+                            return TransactionItem(
+                              name: merchant,
+                              initials: _getInitials(merchant),
+                              amount: '${isCredit ? '+' : '-'}$amount',
+                              date: dateStr,
+                              status: 'PENDING SETTLEMENT',
+                              pending: true,
+                            );
+                          },
+                        ),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-// =======================================================
-// MONTH CARD
-// =======================================================
+  String _getInitials(String name) {
+    final parts = name.trim().split(' ');
+    if (parts.isEmpty) return '??';
+    if (parts.length == 1) {
+      return parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
 
-class _MonthCard extends StatelessWidget {
-  final String month;
-  final List<TransactionItem> items;
-
-  const _MonthCard({
-    required this.month,
-    required this.items,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 24),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF141414),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
-            child: Text(
-              month,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          ...items,
-        ],
-      ),
-    );
+  String _monthName(int month) {
+    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month];
   }
 }
 
 // =======================================================
 // TRANSACTION ITEM (MATCHES YOUR UI)
+// =======================================================
+// TRANSACTION ITEM
 // =======================================================
 
 class TransactionItem extends StatelessWidget {

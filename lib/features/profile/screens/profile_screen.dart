@@ -2,12 +2,59 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import '../../../core/services/auth_service.dart';
+import '../../../core/services/token_service.dart';
+import '../../../core/models/user_model.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  User? _user;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final user = await TokenService.getUser();
+    setState(() {
+      _user = user;
+      _isLoading = false;
+    });
+  }
+
+  String _getMaskedPhone(String phone) {
+    if (phone.length < 4) return phone;
+    return '${phone.substring(0, 3)} •••• ${phone.substring(phone.length - 4)}';
+  }
+
+  String _getWalletId() {
+    if (_user?.id == null || _user!.id.isEmpty) return 'WLT-XXXX-XXXX';
+    final id = _user!.id;
+    if (id.length < 8) return 'WLT-$id';
+    return 'WLT-${id.substring(0, 4).toUpperCase()}-${id.substring(id.length - 4).toUpperCase()}';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0B0B0B),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE8FF3C)),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF0B0B0B),
       body: SafeArea(
@@ -52,26 +99,26 @@ class ProfileScreen extends StatelessWidget {
               // =========================
               Center(
                 child: Column(
-                  children: const [
+                  children: [
                     Text(
-                      'Yajur Chatnani',
-                      style: TextStyle(
+                      _user?.name ?? 'User',
+                      style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    SizedBox(height: 6),
-                    Text(
+                    const SizedBox(height: 6),
+                    const Text(
                       'Wallet owner',
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.white54,
                       ),
                     ),
-                    SizedBox(height: 6),
+                    const SizedBox(height: 6),
                     Text(
-                      '+91 •••• 7974',
-                      style: TextStyle(
+                      _user?.phone != null ? _getMaskedPhone(_user!.phone) : '+XX •••• XXXX',
+                      style: const TextStyle(
                         fontSize: 14,
                         color: Colors.white38,
                       ),
@@ -93,17 +140,34 @@ class ProfileScreen extends StatelessWidget {
 
               _PersonalDetailRow(
                 label: 'Name',
-                value: 'Yajur Chatnani',
+                value: _user?.name ?? 'Not set',
+              ),
+
+              _PersonalDetailRow(
+                label: 'Email',
+                value: _user?.email ?? 'Not set',
               ),
 
               _PersonalDetailRow(
                 label: 'Phone',
-                value: '9109447974',
+                value: _user?.phone ?? 'Not set',
               ),
+
+              if (_user?.age != null)
+                _PersonalDetailRow(
+                  label: 'Age',
+                  value: '${_user!.age}',
+                ),
+
+              if (_user?.gender != null)
+                _PersonalDetailRow(
+                  label: 'Gender',
+                  value: _user!.gender!,
+                ),
 
               _PersonalDetailRow(
                 label: 'Unique App ID',
-                value: _generateUniqueAppId(),
+                value: _generateUniqueAppId(_user?.id ?? ''),
                 isCopyable: true,
               ),
 
@@ -121,9 +185,9 @@ class ProfileScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'WLT-8F3A-92KD',
-                    style: TextStyle(
+                  Text(
+                    _getWalletId(),
+                    style: const TextStyle(
                       fontSize: 15,
                       fontFamily: 'monospace',
                     ),
@@ -132,7 +196,7 @@ class ProfileScreen extends StatelessWidget {
                     label: 'Copy',
                     onTap: () {
                       Clipboard.setData(
-                        const ClipboardData(text: 'WLT-8F3A-92KD'),
+                        ClipboardData(text: _getWalletId()),
                       );
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -201,6 +265,85 @@ class ProfileScreen extends StatelessWidget {
               ),
 
               const SizedBox(height: 24),
+              
+              // =========================
+              // LOGOUT BUTTON
+              // =========================
+              Center(
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      // Show confirmation dialog
+                      final shouldLogout = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xFF1A1A1A),
+                          title: const Text(
+                            'Logout',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          content: const Text(
+                            'Are you sure you want to logout?',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(color: Colors.white60),
+                              ),
+                            ),
+                            ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red.shade400,
+                              ),
+                              child: const Text(
+                                'Logout',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (shouldLogout == true && context.mounted) {
+                        await AuthService.logout();
+                        if (context.mounted) {
+                          Navigator.pushNamedAndRemoveUntil(
+                            context,
+                            '/login',
+                            (route) => false,
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.withValues(alpha: 0.1),
+                      foregroundColor: Colors.red.shade400,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.red.shade400),
+                      ),
+                      elevation: 0,
+                    ),
+                    icon: Icon(Icons.logout_rounded, color: Colors.red.shade400),
+                    label: Text(
+                      'Logout',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red.shade400,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -209,10 +352,9 @@ class ProfileScreen extends StatelessWidget {
   }
 
   /// Generates a cryptographically unique app ID
-  static String _generateUniqueAppId() {
-    // Use device ID or user-specific seed for production
-    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final seed = 'RUDRAPAY-$timestamp-Yajur';
+  static String _generateUniqueAppId(String userId) {
+    // Use user ID as seed for consistent app ID
+    final seed = 'RUDRAPAY-$userId';
     final bytes = utf8.encode(seed);
     final hash = sha256.convert(bytes);
     return hash.toString().substring(0, 32).toUpperCase();

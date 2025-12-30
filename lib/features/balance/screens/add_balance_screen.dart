@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/errors/app_exception.dart';
 import '../services/wallet_service.dart';
 import '../services/storage_service.dart';
 import 'recharge_result_screen.dart';
@@ -475,6 +476,7 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
       _showErrorSnackbar(
         context,
         'Free tokens limit exhausted! You have used all 500 free tokens. No more tokens available.',
+        Icons.block_rounded,
       );
       return;
     }
@@ -482,13 +484,13 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
     // Validate amount input
     final amountStr = _amountController.text.trim();
     if (amountStr.isEmpty) {
-      _showErrorSnackbar(context, 'Please enter an amount');
+      _showErrorSnackbar(context, 'Please enter an amount', Icons.warning_rounded);
       return;
     }
 
     final amount = int.tryParse(amountStr);
     if (amount == null || amount <= 0) {
-      _showErrorSnackbar(context, 'Please enter a valid amount');
+      _showErrorSnackbar(context, 'Please enter a valid amount', Icons.warning_rounded);
       return;
     }
 
@@ -496,6 +498,7 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
       _showErrorSnackbar(
         context,
         'Amount cannot exceed $_freeTokensLeft available tokens.\nYou have $_freeTokensLeft tokens remaining.',
+        Icons.warning_rounded,
       );
       return;
     }
@@ -527,7 +530,11 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
           ),
         );
       } else if (mounted) {
-        _showErrorSnackbar(context, response.message);
+        _showErrorSnackbar(context, response.message, Icons.error_outline_rounded);
+      }
+    } on AppException catch (e) {
+      if (mounted) {
+        _showErrorSnackbar(context, e.message, e.icon);
       }
     } catch (e) {
       if (mounted) {
@@ -535,7 +542,7 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
         if (errorMessage.startsWith('Exception: ')) {
           errorMessage = errorMessage.substring(11);
         }
-        _showErrorSnackbar(context, errorMessage);
+        _showErrorSnackbar(context, errorMessage, Icons.help_outline_rounded);
       }
     } finally {
       if (mounted) {
@@ -546,20 +553,36 @@ class _AddBalanceScreenState extends State<AddBalanceScreen> {
     }
   }
 
-  void _showErrorSnackbar(BuildContext context, String message) {
+  void _showErrorSnackbar(BuildContext context, String message, IconData icon) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(color: Colors.white),
+        content: Row(
+          children: [
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
         ),
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-        backgroundColor: Colors.red.withValues(alpha: 0.8),
+        duration: const Duration(seconds: 4),
+        backgroundColor: Colors.red.withValues(alpha: 0.9),
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
         ),
+        elevation: 6,
       ),
     );
   }

@@ -5,6 +5,7 @@ import '../models/recharge_response.dart';
 class StorageService {
   static const String _balanceKey = 'wallet_balance';
   static const String _tokensKey = 'wallet_tokens';
+  static const String _lockedTokensKey = 'locked_tokens';
   static const String _totalTokensKey = 'total_tokens_received';
   static const String _freeTokensUsedKey = 'free_tokens_used';
   static const int _maxFreeTokens = 500;
@@ -34,6 +35,21 @@ class StorageService {
     try {
       final currentBalance = await getBalance();
       final newBalance = currentBalance + amount;
+      await saveBalance(newBalance);
+      return newBalance;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /// Deduct amount from balance
+  static Future<int> deductBalance(int amount) async {
+    try {
+      final currentBalance = await getBalance();
+      final newBalance = currentBalance - amount;
+      if (newBalance < 0) {
+        return currentBalance; // Don't allow negative balance
+      }
       await saveBalance(newBalance);
       return newBalance;
     } catch (e) {
@@ -156,6 +172,102 @@ class StorageService {
       return _maxFreeTokens - finalUsed;
     } catch (e) {
       return _maxFreeTokens;
+    }
+  }
+
+  /// Get unused tokens sorted by creation date (oldest first)
+  static Future<List<Token>> getUnusedTokens(int count) async {
+    try {
+      final allTokens = await getTokens();
+      final unusedTokens = allTokens.where((t) => !t.used).toList();
+      
+      // Sort by createdAt (oldest first)
+      unusedTokens.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      
+      // Return requested count
+      return unusedTokens.take(count).toList();
+    } catch (e) {
+      print('[STORAGE] Error getting unused tokens: $e');
+      return [];
+    }
+  }
+
+  /// Lock tokens for transfer (mark them as pending)
+  static Future<bool> lockTokens(String txnId, List<Token> tokens) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lockedData = {
+        'txnId': txnId,
+        'tokens': tokens.map((t) => t.toJson()).toList(),
+        'lockedAt': DateTime.now().toIso8601String(),
+      };
+      return await prefs.setString(_lockedTokensKey, jsonEncode(lockedData));
+    } catch (e) {
+      print('[STORAGE] Error locking tokens: $e');
+      return false;
+    }
+  }
+
+  /// Unlock tokens (remove lock after failed transfer)
+  static Future<bool> unlockTokens() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return await prefs.remove(_lockedTokensKey);
+    } catch (e) {
+      print('[STORAGE] Error unlocking tokens: $e');
+      return false;
+    }
+  }
+
+  /// Get locked tokens for a transaction
+  static Future<Map<String, dynamic>?> getLockedTokens() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonString = prefs.getString(_lockedTokensKey);
+      if (jsonString == null) return null;
+      
+      return jsonDecode(jsonString) as Map<String, dynamic>;
+    } catch (e) {
+      print('[STORAGE] Error getting locked tokens: $e');
+      return null;
+    }
+  }
+
+  /// Remove tokens from storage (after successful transfer)
+  static Future<bool> removeTokens(List<String> tokenIds) async {
+    try {
+      final allTokens = await getTokens();
+      final remainingTokens = allTokens
+          .where((t) => !tokenIds.contains(t.tokenId))
+          .toList();
+      
+      await saveTokens(remainingTokens);
+      
+      // Update balance to match token count
+      await saveBalance(remainingTokens.length);
+      
+      return true;
+    } catch (e) {
+      print('[STORAGE] Error removing tokens: $e');
+      return false;
+    }
+  }
+
+  /// Add tokens to storage (after receiving)
+  static Future<bool> addTokens(List<Token> newTokens) async {
+    try {
+      final existingTokens = await getTokens();
+      final allTokens = [...existingTokens, ...newTokens];
+      
+      await saveTokens(allTokens);
+      
+      // Update balance to match token count
+      await saveBalance(allTokens.length);
+      
+      return true;
+    } catch (e) {
+      print('[STORAGE] Error adding tokens: $e');
+      return false;
     }
   }
 }

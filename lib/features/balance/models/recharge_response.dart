@@ -51,4 +51,14 @@ class Token {
       createdAt: json['createdAt'] ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'tokenId': tokenId,
+      'value': value,
+      'used': used,
+      'signature': signature,
+      'createdAt': createdAt,
+    };
+  }
 }

@@ -5,6 +5,13 @@ class TransactionResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>? ?? {};
+    final amount = args['amount'] as int? ?? 0;
+    final otherPartyName = args['otherPartyName'] as String? ?? args['deviceName'] as String? ?? 'User';
+    final txnId = args['txnId'] as String? ?? 'N/A';
+    final method = args['method'] as String? ?? 'Bluetooth';
+    final isReceiver = args['isReceiver'] as bool? ?? false;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0B0B0B),
       body: Column(
@@ -21,9 +28,9 @@ class TransactionResultScreen extends StatelessWidget {
               ),
             ),
             child: Column(
-              children: const [
+              children: [
                 // Checkmark
-                CircleAvatar(
+                const CircleAvatar(
                   radius: 28,
                   backgroundColor: Colors.white,
                   child: Icon(
@@ -32,31 +39,31 @@ class TransactionResultScreen extends StatelessWidget {
                     size: 32,
                   ),
                 ),
-                SizedBox(height: 16),
+                const SizedBox(height: 16),
 
                 Text(
-                  'Payment Sent',
-                  style: TextStyle(
+                  isReceiver ? 'Payment Received' : 'Payment Sent',
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
 
                 Text(
-                  '₹450',
-                  style: TextStyle(
+                  isReceiver ? '$amount Tokens' : '₹$amount',
+                  style: const TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 6),
+                const SizedBox(height: 6),
 
                 Text(
-                  'Pending settlement',
-                  style: TextStyle(
+                  isReceiver ? 'Tokens received and verified' : '$amount tokens sent successfully',
+                  style: const TextStyle(
                     fontSize: 14,
                     color: Colors.white70,
                   ),
@@ -71,16 +78,16 @@ class TransactionResultScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
-              children: const [
+              children: [
                 _ResultRow(
                   label: 'Transaction ID',
-                  value: 'TXN-2512-449AF',
+                  value: txnId,
                   monospace: true,
                 ),
                 _ResultRow(label: 'Type', value: 'Payment'),
-                _ResultRow(label: 'To', value: 'CafeX Store'),
-                _ResultRow(label: 'Method', value: 'Bluetooth'),
-                _ResultRow(label: 'Time', value: 'Dec 25, 3:45 PM'),
+                _ResultRow(label: isReceiver ? 'From' : 'To', value: otherPartyName),
+                _ResultRow(label: 'Method', value: method),
+                _ResultRow(label: 'Status', value: 'Completed'),
               ],
             ),
           ),
@@ -94,8 +101,8 @@ class TransactionResultScreen extends StatelessWidget {
               onTap: () {
                 Navigator.pushNamedAndRemoveUntil(
                   context,
-                  '/',
-                      (route) => false,
+                  '/home',
+                  (route) => false,
                 );
               },
               child: Container(

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../balance/services/storage_service.dart';
+import '../../balance/services/transaction_storage_service.dart';
+import '../../../core/services/token_service.dart';
+import '../../../core/models/user_model.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,11 +14,16 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _showNotifications = false;
   int _balance = 0;
+  User? _user;
+  List<Map<String, dynamic>> _recentTransactions = [];
+  bool _loadingTransactions = true;
 
   @override
   void initState() {
     super.initState();
     _loadBalance();
+    _loadUser();
+    _loadRecentTransactions();
   }
 
   Future<void> _loadBalance() async {
@@ -23,6 +31,46 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _balance = balance;
     });
+  }
+
+  Future<void> _loadUser() async {
+    final user = await TokenService.getUser();
+    setState(() {
+      _user = user;
+    });
+  }
+  
+  Future<void> _loadRecentTransactions() async {
+    try {
+      final unsettled = await TransactionStorageService.getUnsettledTransactions();
+      // For now, show unsettled transactions (pending settlement)
+      // In future, combine with settled transactions from server
+      setState(() {
+        _recentTransactions = unsettled.take(2).toList();
+        _loadingTransactions = false;
+      });
+    } catch (e) {
+      print('[HOME] Error loading transactions: $e');
+      setState(() {
+        _loadingTransactions = false;
+      });
+    }
+  }
+
+  String _getInitials(String name) {
+    final parts = name.trim().split(' ');
+    if (parts.isEmpty) return '??';
+    if (parts.length == 1) {
+      return parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
+  String _getShortWalletId() {
+    if (_user?.id == null || _user!.id.isEmpty) return 'WLT...XXXX';
+    final id = _user!.id;
+    if (id.length < 8) return 'WLT...$id';
+    return 'WLT...${id.substring(id.length - 4).toUpperCase()}';
   }
 
   @override
@@ -108,12 +156,12 @@ class _HomeScreenState extends State<HomeScreen> {
           onTap: () => Navigator.pushNamed(context, '/profile'),
           child: Row(
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 22,
-                backgroundColor: Color(0xFFE8FF3C),
+                backgroundColor: const Color(0xFFE8FF3C),
                 child: Text(
-                  'YC',
-                  style: TextStyle(
+                  _user != null ? _getInitials(_user!.name) : 'U',
+                  style: const TextStyle(
                     color: Colors.black,
                     fontWeight: FontWeight.bold,
                   ),
@@ -122,18 +170,18 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Text(
-                    'Yajur Chatnani',
-                    style: TextStyle(
+                    _user?.name ?? 'Loading...',
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   Text(
-                    'WLT...92KD',
-                    style: TextStyle(
+                    _getShortWalletId(),
+                    style: const TextStyle(
                       fontSize: 12,
                       color: Colors.white54,
                     ),
@@ -533,37 +581,86 @@ class _HomeScreenState extends State<HomeScreen> {
               width: 0.5,
             ),
           ),
-          child: Column(
-            children: [
-              _transactionItem(
-                'CafeX Store',
-                'Dec 25, 2:30 PM',
-                '₹450',
-                negative: true,
-              ),
-              Container(
-                height: 1,
-                color: const Color(0xFF2A2A2A),
-              ),
-              _transactionItem(
-                'Priya Sharma',
-                'Dec 24, 8:45 AM',
-                '+₹1,200',
-              ),
-            ],
-          ),
+          child: _loadingTransactions
+              ? const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFFE8FF3C),
+                      strokeWidth: 2,
+                    ),
+                  ),
+                )
+              : _recentTransactions.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(
+                        child: Text(
+                          'No recent transactions',
+                          style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        for (int i = 0; i < _recentTransactions.length; i++) ...[  if (i > 0)
+                            Container(
+                              height: 1,
+                              color: const Color(0xFF2A2A2A),
+                            ),
+                          _buildTransactionItem(_recentTransactions[i]),
+                        ],
+                      ],
+                    ),
         ),
       ],
     );
   }
 
+  Widget _buildTransactionItem(Map<String, dynamic> txn) {
+    final merchant = txn['merchant'] as String? ?? 'Unknown';
+    final amount = txn['amount'] as int? ?? 0;
+    final type = txn['type'] as String? ?? 'debit';
+    final timestamp = txn['timestamp'] as String? ?? '';
+    final isCredit = type == 'credit';
+    
+    // Format timestamp
+    String timeStr = 'Just now';
+    try {
+      final dt = DateTime.parse(timestamp);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inMinutes < 1) {
+        timeStr = 'Just now';
+      } else if (diff.inHours < 1) {
+        timeStr = '${diff.inMinutes}m ago';
+      } else if (diff.inDays < 1) {
+        timeStr = '${diff.inHours}h ago';
+      } else {
+        timeStr = '${dt.month}/${dt.day} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+      }
+    } catch (e) {
+      // Keep default
+    }
+    
+    return _transactionItem(
+      merchant,
+      timeStr,
+      '${isCredit ? '+' : '-'}$amount',
+      negative: !isCredit,
+    );
+  }
+  
   Widget _transactionItem(
       String name,
       String time,
       String amount, {
         bool negative = false,
       }) {
-    final initials = name.split(' ').take(2).map((e) => e[0]).join().toUpperCase();
+    final initials = name.split(' ').take(2).map((e) => e.isNotEmpty ? e[0] : '?').join().toUpperCase();
     final Color avatarColor = negative ? const Color(0xFFFF6B6B) : const Color(0xFF4ECDC4);
     
     return Padding(

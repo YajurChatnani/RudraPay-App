@@ -1,5 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../balance/services/storage_service.dart';
+import '../../balance/services/transaction_storage_service.dart';
+import '../../../core/services/classic_bluetooth_service.dart';
+import '../../../core/services/token_service.dart';
 
 class EnterAmountScreen extends StatefulWidget {
   const EnterAmountScreen({super.key});
@@ -10,8 +16,158 @@ class EnterAmountScreen extends StatefulWidget {
 
 class _EnterAmountScreenState extends State<EnterAmountScreen> {
   final TextEditingController _controller = TextEditingController(text: '0');
+  final ClassicBluetoothService _classicService = ClassicBluetoothService();
+
+  int _availableBalance = 0;
+  String _deviceName = 'Unknown Device';
+  String _userName = 'User';
+  int? _connectionHandle;
+  String? _connectionAddress;
+  bool _isSending = false;
 
   int get amount => int.tryParse(_controller.text.replaceAll(RegExp(r'\D'), '')) ?? 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Wait for the first frame so ModalRoute.of(context) is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadData();
+    });
+  }
+
+  Future<void> _loadData() async {
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+    setState(() {
+      _deviceName = args?['deviceName'] ?? args?['connectionAddress'] ?? 'Unknown Device';
+      _userName = args?['userName'] ?? 'User';
+      _connectionHandle = args?['connectionHandle'] as int?;
+      _connectionAddress = args?['connectionAddress'] as String?;
+    });
+
+    final balance = await StorageService.getBalance();
+    if (mounted) {
+      setState(() {
+        _availableBalance = balance;
+      });
+    }
+  }
+
+  Future<void> _sendPayment() async {
+    if (_connectionHandle == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No connection handle, reconnect and try again')),
+      );
+      return;
+    }
+
+    final amt = amount;
+    if (amt <= 0) return;
+
+    // Check if sufficient balance
+    if (amt > _availableBalance) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Insufficient balance. You have $_availableBalance tokens.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      print('[ENTER-AMOUNT] Starting token transfer: $amt tokens');
+      
+      // Get user info
+      final user = await TokenService.getUser();
+      final senderName = user?.name ?? _userName;
+      
+      // Select tokens (oldest first, unused only)
+      final tokensToSend = await StorageService.getUnusedTokens(amt);
+      
+      if (tokensToSend.length < amt) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Insufficient unused tokens. Found ${tokensToSend.length}, need $amt')),
+          );
+        }
+        setState(() => _isSending = false);
+        return;
+      }
+
+      // Generate transaction ID
+      final timestamp = DateTime.now().toIso8601String();
+      final tokenIds = tokensToSend.map((t) => t.tokenId).toList();
+      final txnId = TransactionStorageService.generateTxnId(
+        senderName: senderName,
+        receiverName: _deviceName,
+        amount: amt,
+        timestamp: timestamp,
+        tokenIds: tokenIds,
+      );
+
+      print('[ENTER-AMOUNT] Generated txnId: $txnId');
+
+      // Lock tokens for transfer
+      await StorageService.lockTokens(txnId, tokensToSend);
+      print('[ENTER-AMOUNT] Locked $amt tokens');
+
+      // Save as unsettled transaction (debit for sender)
+      await TransactionStorageService.saveUnsettledTransaction(
+        txnId: txnId,
+        amount: amt,
+        type: 'debit',
+        merchant: _deviceName,
+        timestamp: timestamp,
+      );
+      print('[ENTER-AMOUNT] Saved unsettled transaction');
+
+      // Prepare payment request message
+      final paymentRequest = {
+        'type': 'payment_request',
+        'txnId': txnId,
+        'amount': amt,
+        'senderName': senderName,
+        'timestamp': timestamp,
+      };
+
+      // Send payment request
+      print('[ENTER-AMOUNT] Sending payment request...');
+      await _classicService.sendBytes(
+        _connectionHandle!,
+        Uint8List.fromList(utf8.encode(jsonEncode(paymentRequest))),
+      );
+      print('[ENTER-AMOUNT] Payment request sent');
+
+      if (mounted) {
+        // Navigate to pending screen with txnId and tokens
+        Navigator.pushNamed(context, '/pay/pending', arguments: {
+          'amount': amt,
+          'deviceName': _deviceName,
+          'connectionHandle': _connectionHandle,
+          'connectionAddress': _connectionAddress,
+          'txnId': txnId,
+          'tokens': tokensToSend.map((t) => t.toJson()).toList(),
+          'timestamp': timestamp,
+        });
+      }
+    } catch (e) {
+      print('[ENTER-AMOUNT] Error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Send failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -59,8 +215,8 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
+                        children: [
+                          const Text(
                             'PAYING TO',
                             style: TextStyle(
                               fontSize: 12,
@@ -68,16 +224,16 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
                               color: Colors.white38,
                             ),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Text(
-                            'CafeX Store',
-                            style: TextStyle(
+                            _deviceName,
+                            style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          SizedBox(height: 4),
-                          Text(
+                          const SizedBox(height: 4),
+                          const Text(
                             'Via Bluetooth',
                             style: TextStyle(
                               fontSize: 14,
@@ -111,7 +267,7 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
                         ),
                         const SizedBox(height: 12),
                         const Text(
-                          'Indian Rupees (₹)',
+                          'Tokens',
                           style: TextStyle(
                             fontSize: 14,
                             color: Colors.white54,
@@ -137,20 +293,20 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     child: Column(
-                      children: const [
+                      children: [
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Paying from', style: TextStyle(color: Colors.white54)),
-                            Text('Wallet balance', style: TextStyle(fontWeight: FontWeight.w500)),
+                            const Text('Paying from', style: TextStyle(color: Colors.white54)),
+                            Text('Wallet balance ($_userName)', style: const TextStyle(fontWeight: FontWeight.w500)),
                           ],
                         ),
-                        SizedBox(height: 6),
+                        const SizedBox(height: 6),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Available', style: TextStyle(color: Colors.white54)),
-                            Text('₹2,450', style: TextStyle(fontWeight: FontWeight.w500)),
+                            const Text('Available', style: TextStyle(color: Colors.white54)),
+                            Text('$_availableBalance Tokens', style: const TextStyle(fontWeight: FontWeight.w500)),
                           ],
                         ),
                       ],
@@ -174,13 +330,15 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
                   Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset + 16),
                     child: _SlideToPay(
-                      enabled: amount > 0,
-                      label: amount > 0 ? 'Slide to pay ₹$amount' : 'Enter amount to pay',
-                      onConfirmed: amount > 0
-                          ? () {
-                        Navigator.pushNamed(context, '/pay/pending');
-                            }
-                          : null,
+                      enabled: amount > 0 && !_isSending && amount <= _availableBalance,
+                      label: _isSending
+                          ? 'Sending...'
+                          : amount > _availableBalance
+                              ? 'Insufficient balance ($_availableBalance tokens available)'
+                              : amount > 0
+                                  ? 'Slide to pay $amount Tokens'
+                                  : 'Enter amount to pay',
+                      onConfirmed: amount > 0 && !_isSending && amount <= _availableBalance ? _sendPayment : null,
                     ),
                   ),
                 ],

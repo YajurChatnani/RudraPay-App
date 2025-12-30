@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/recharge_response.dart';
 import '../services/storage_service.dart';
+import '../../../features/home/screens/home_screen.dart';
 
 class RechargeResultScreen extends StatefulWidget {
   final RechargeResponse response;
@@ -240,10 +241,11 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: () {
-                            Navigator.pushNamedAndRemoveUntil(
+                            Navigator.pushReplacement(
                               context,
-                              '/',
-                              (route) => false,
+                              MaterialPageRoute(
+                                builder: (context) => const HomeScreen(),
+                              ),
                             );
                           },
                           style: ElevatedButton.styleFrom(
