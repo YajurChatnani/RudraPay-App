@@ -437,9 +437,9 @@ class _ReceiveBluetoothConnectedScreenState
         _statusMessage = 'Verifying tokens...';
       });
 
-      // Add tokens to storage
-      await StorageService.addTokens(tokens);
-      print('[RECEIVE-CONNECTED] Added ${tokens.length} tokens to storage');
+      // Lock tokens as unsettled (don't add to main balance yet)
+      await StorageService.lockTokens(txnId, tokens);
+      print('[RECEIVE-CONNECTED] Locked ${tokens.length} tokens as unsettled');
 
       // Save as unsettled transaction (credit for receiver)
       await TransactionStorageService.saveUnsettledTransaction(

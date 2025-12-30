@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/recharge_response.dart';
 import '../services/storage_service.dart';
+import '../services/transaction_storage_service.dart';
 import '../../../features/home/screens/home_screen.dart';
+import '../../../core/services/token_service.dart';
 
 class RechargeResultScreen extends StatefulWidget {
   final RechargeResponse response;
@@ -43,6 +45,27 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
     await StorageService.saveTotalTokensReceived(
       currentTotal + widget.response.totalTokens,
     );
+
+    // Create a settled transaction for server-added balance
+    try {
+      final user = await TokenService.getUser();
+      final userName = user?.name ?? 'User';
+      
+      // Generate transaction ID for this recharge
+      final txnId = 'recharge_${DateTime.now().millisecondsSinceEpoch}';
+      
+      // Save as SETTLED transaction (credit from server, not awaiting settlement)
+      await TransactionStorageService.saveSettledTransaction(
+        txnId: txnId,
+        amount: widget.response.totalTokens,
+        type: 'credit',
+        merchant: 'RudraPay Server',
+        timestamp: DateTime.now().toIso8601String(),
+      );
+      print('[RECHARGE] Created settled transaction for server balance addition');
+    } catch (e) {
+      print('[RECHARGE] Error creating transaction: $e');
+    }
 
     // Update the displayed balance
     if (mounted) {

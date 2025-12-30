@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/recharge_response.dart';
+import '../../../core/services/token_service.dart';
 
 class StorageService {
   static const String _balanceKey = 'wallet_balance';
@@ -10,11 +11,19 @@ class StorageService {
   static const String _freeTokensUsedKey = 'free_tokens_used';
   static const int _maxFreeTokens = 500;
 
+  /// Get user-scoped storage key
+  static Future<String> _getUserKey(String baseKey) async {
+    final user = await TokenService.getUser();
+    final userId = user?.id ?? 'guest';
+    return '${userId}_$baseKey';
+  }
+
   /// Get current balance from storage
   static Future<int> getBalance() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getInt(_balanceKey) ?? 0;
+      final key = await _getUserKey(_balanceKey);
+      return prefs.getInt(key) ?? 0;
     } catch (e) {
       return 0;
     }
@@ -24,7 +33,8 @@ class StorageService {
   static Future<bool> saveBalance(int balance) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return await prefs.setInt(_balanceKey, balance);
+      final key = await _getUserKey(_balanceKey);
+      return await prefs.setInt(key, balance);
     } catch (e) {
       return false;
     }
@@ -61,6 +71,7 @@ class StorageService {
   static Future<bool> saveTokens(List<Token> tokens) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final key = await _getUserKey(_tokensKey);
       final tokensList = tokens.map((token) {
         return {
           'tokenId': token.tokenId,
@@ -71,7 +82,7 @@ class StorageService {
         };
       }).toList();
       final jsonString = jsonEncode(tokensList);
-      return await prefs.setString(_tokensKey, jsonString);
+      return await prefs.setString(key, jsonString);
     } catch (e) {
       return false;
     }
@@ -81,7 +92,8 @@ class StorageService {
   static Future<List<Token>> getTokens() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonString = prefs.getString(_tokensKey);
+      final key = await _getUserKey(_tokensKey);
+      final jsonString = prefs.getString(key);
       if (jsonString == null) return [];
 
       final List<dynamic> jsonList = jsonDecode(jsonString);
@@ -97,7 +109,8 @@ class StorageService {
   static Future<bool> saveTotalTokensReceived(int total) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return await prefs.setInt(_totalTokensKey, total);
+      final key = await _getUserKey(_totalTokensKey);
+      return await prefs.setInt(key, total);
     } catch (e) {
       return false;
     }
@@ -107,7 +120,8 @@ class StorageService {
   static Future<int> getTotalTokensReceived() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getInt(_totalTokensKey) ?? 0;
+      final key = await _getUserKey(_totalTokensKey);
+      return prefs.getInt(key) ?? 0;
     } catch (e) {
       return 0;
     }
@@ -131,7 +145,8 @@ class StorageService {
   static Future<int> getFreeTokensUsed() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getInt(_freeTokensUsedKey) ?? 0;
+      final key = await _getUserKey(_freeTokensUsedKey);
+      return prefs.getInt(key) ?? 0;
     } catch (e) {
       return 0;
     }
@@ -167,7 +182,8 @@ class StorageService {
       final finalUsed = newUsed > _maxFreeTokens ? _maxFreeTokens : newUsed;
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_freeTokensUsedKey, finalUsed);
+      final key = await _getUserKey(_freeTokensUsedKey);
+      await prefs.setInt(key, finalUsed);
 
       return _maxFreeTokens - finalUsed;
     } catch (e) {
@@ -196,12 +212,13 @@ class StorageService {
   static Future<bool> lockTokens(String txnId, List<Token> tokens) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final key = await _getUserKey(_lockedTokensKey);
       final lockedData = {
         'txnId': txnId,
         'tokens': tokens.map((t) => t.toJson()).toList(),
         'lockedAt': DateTime.now().toIso8601String(),
       };
-      return await prefs.setString(_lockedTokensKey, jsonEncode(lockedData));
+      return await prefs.setString(key, jsonEncode(lockedData));
     } catch (e) {
       print('[STORAGE] Error locking tokens: $e');
       return false;
@@ -212,7 +229,8 @@ class StorageService {
   static Future<bool> unlockTokens() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return await prefs.remove(_lockedTokensKey);
+      final key = await _getUserKey(_lockedTokensKey);
+      return await prefs.remove(key);
     } catch (e) {
       print('[STORAGE] Error unlocking tokens: $e');
       return false;
@@ -223,7 +241,8 @@ class StorageService {
   static Future<Map<String, dynamic>?> getLockedTokens() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonString = prefs.getString(_lockedTokensKey);
+      final key = await _getUserKey(_lockedTokensKey);
+      final jsonString = prefs.getString(key);
       if (jsonString == null) return null;
       
       return jsonDecode(jsonString) as Map<String, dynamic>;

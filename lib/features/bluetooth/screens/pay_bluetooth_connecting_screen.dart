@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../../../core/services/classic_bluetooth_service.dart';
 import '../../../core/services/token_service.dart';
 
@@ -77,8 +76,8 @@ class _PayBluetoothConnectingScreenState
           _foundDevices = devices;
           _isScanning = false;
           _statusMessage = devices.isEmpty 
-              ? 'No devices found nearby' 
-              : 'Found ${devices.length} device(s)';
+              ? 'No devices found nearby. Tap to rescan.' 
+              : 'Found ${devices.length} device(s). Select to connect.';
         });
       }
 

@@ -41,9 +41,9 @@ class WalletService {
           jsonResponse['message'] ?? 'Invalid request. Please check the amount.',
         );
       } else if (response.statusCode == 401) {
-        throw AppException.unauthorized(null);
+        throw AppException.unauthorized('Unauthorized access. Please login again.');
       } else if (response.statusCode == 500) {
-        throw AppException.server(null);
+        throw AppException.server('Server error. Please try again later.');
       } else {
         throw AppException.unknown(
           'Failed to recharge. Error code: ${response.statusCode}',

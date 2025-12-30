@@ -22,8 +22,18 @@ class _TransactionsListScreenState extends State<TransactionsListScreen> {
   Future<void> _loadTransactions() async {
     try {
       final unsettled = await TransactionStorageService.getUnsettledTransactions();
+      final settled = await TransactionStorageService.getSettledTransactions();
+      
+      // Combine and sort by timestamp (most recent first)
+      final allTransactions = [...unsettled, ...settled];
+      allTransactions.sort((a, b) {
+        final aTime = DateTime.tryParse(a['timestamp'] as String? ?? '') ?? DateTime(1970);
+        final bTime = DateTime.tryParse(b['timestamp'] as String? ?? '') ?? DateTime(1970);
+        return bTime.compareTo(aTime);
+      });
+      
       setState(() {
-        _transactions = unsettled;
+        _transactions = allTransactions;
         _loading = false;
       });
     } catch (e) {
@@ -116,6 +126,7 @@ class _TransactionsListScreenState extends State<TransactionsListScreen> {
                             final type = txn['type'] as String? ?? 'debit';
                             final timestamp = txn['timestamp'] as String? ?? '';
                             final isCredit = type == 'credit';
+                            final isUnsettled = txn['settledAt'] == null;
 
                             // Format date
                             String dateStr = 'Just now';
@@ -131,8 +142,8 @@ class _TransactionsListScreenState extends State<TransactionsListScreen> {
                               initials: _getInitials(merchant),
                               amount: '${isCredit ? '+' : '-'}$amount',
                               date: dateStr,
-                              status: 'PENDING SETTLEMENT',
-                              pending: true,
+                              status: isUnsettled ? 'PENDING SETTLEMENT' : 'SETTLED',
+                              pending: isUnsettled,
                             );
                           },
                         ),
