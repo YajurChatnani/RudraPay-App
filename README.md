@@ -53,7 +53,7 @@ RudraPay is an innovative **offline-first digital wallet** that enables peer-to-
 - Android only (Bluetooth needs real devices)  
 - Enable “Install from unknown sources”  
 - Use this build for testing — not production
-- 
+  
 ### Key Innovation
 
 - **🔄 Offline Payments**: Transfer digital tokens via Bluetooth without internet
