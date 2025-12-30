@@ -50,10 +50,10 @@ RudraPay is an innovative **offline-first digital wallet** that enables peer-to-
 👉 [RudraPay-Beta.apk](https://drive.google.com/file/d/1-L6RaeMQv2S56zwle9rVU_uSsheyFCVf/view)
 
 **Notes**
-- Android only (Bluetooth needs real devices)
-- Enable “Install from unknown sources”
+- Android only (Bluetooth needs real devices)  
+- Enable “Install from unknown sources”  
 - Use this build for testing — not production
-
+  
 ### Key Innovation
 
 - **🔄 Offline Payments**: Transfer digital tokens via Bluetooth without internet
@@ -63,6 +63,25 @@ RudraPay is an innovative **offline-first digital wallet** that enables peer-to-
 - **🔄 Eventual Consistency**: Transactions settle when devices sync online
 
 ---
+
+## 📸 App Screenshots
+
+<p align="center">
+  <img src=".kiro/Screenshots/HomeScreen.jpg" width="220"/>
+  <img src=".kiro/Screenshots/EnterAmount.jpg" width="220"/>
+  <img src=".kiro/Screenshots/PaymentConfirm.jpg" width="220"/>
+</p>
+
+<p align="center">
+  <img src=".kiro/Screenshots/Scanning.jpg" width="220"/>
+  <img src=".kiro/Screenshots/ReadyToReceive.jpg" width="220"/>
+  <img src=".kiro/Screenshots/CreateAccount.jpg" width="220"/>
+</p>
+
+<p align="center">
+  <i>Home • Enter Amount • Confirm • Bluetooth Scan • Ready to Receive • Create Account</i>
+</p>
+
 
 ## ✨ Features
 
