@@ -19,15 +19,22 @@ import java.util.concurrent.atomic.AtomicInteger
 class MainActivity : FlutterActivity() {
 	private val channelName = "com.rudrapay.app/classic_bt"
 	private val eventChannelName = "com.rudrapay.app/classic_bt_stream"
+	private val secureStorageChannelName = "com.rudrapay.app/secure_storage"
 	private val executor = Executors.newCachedThreadPool()
 	private val socketHandles = ConcurrentHashMap<Int, BluetoothSocket>()
 	private val readerFutures = ConcurrentHashMap<Int, java.util.concurrent.Future<*>>()
 	private var serverSocket: BluetoothServerSocket? = null
 	private val handleCounter = AtomicInteger(1)
+	private lateinit var secureSessionStore: SecureSessionStore
 	@Volatile private var eventSink: EventChannel.EventSink? = null
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
+
+		secureSessionStore = SecureSessionStore(
+			context = applicationContext,
+			legacyPrefsName = "FlutterSharedPreferences"
+		)
 
 		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
 			when (call.method) {
@@ -49,6 +56,82 @@ class MainActivity : FlutterActivity() {
 				eventSink = null
 			}
 		})
+
+		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, secureStorageChannelName).setMethodCallHandler { call, result ->
+			try {
+				when (call.method) {
+					"setString" -> {
+						val args = call.arguments as? Map<*, *> ?: return@setMethodCallHandler result.error("ARG", "arguments missing", null)
+						val key = args["key"] as? String ?: return@setMethodCallHandler result.error("ARG", "key missing", null)
+						val value = args["value"] as? String ?: return@setMethodCallHandler result.error("ARG", "value missing", null)
+						secureSessionStore.setString(key, value)
+						result.success(true)
+					}
+					"getString" -> {
+						val key = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "key missing", null)
+						result.success(secureSessionStore.getString(key))
+					}
+					"setInt" -> {
+						val args = call.arguments as? Map<*, *> ?: return@setMethodCallHandler result.error("ARG", "arguments missing", null)
+						val key = args["key"] as? String ?: return@setMethodCallHandler result.error("ARG", "key missing", null)
+						val value = args["value"] as? Int ?: return@setMethodCallHandler result.error("ARG", "value missing", null)
+						secureSessionStore.setInt(key, value)
+						result.success(true)
+					}
+					"getInt" -> {
+						val key = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "key missing", null)
+						result.success(secureSessionStore.getInt(key))
+					}
+					"remove" -> {
+						val key = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "key missing", null)
+						secureSessionStore.removeKey(key)
+						result.success(true)
+					}
+					"saveSession" -> {
+						val args = call.arguments as? Map<*, *> ?: return@setMethodCallHandler result.error("ARG", "arguments missing", null)
+						val token = args["token"] as? String ?: return@setMethodCallHandler result.error("ARG", "token missing", null)
+						val userJson = args["userJson"] as? String ?: return@setMethodCallHandler result.error("ARG", "userJson missing", null)
+						val userId = args["userId"] as? String ?: ""
+						secureSessionStore.saveSession(token, userJson, userId)
+						result.success(true)
+					}
+					"getToken" -> result.success(secureSessionStore.getToken())
+					"getUserJson" -> result.success(secureSessionStore.getUserJson())
+					"isLoggedIn" -> result.success(secureSessionStore.isLoggedIn())
+					"clearSession" -> {
+						secureSessionStore.clearSession()
+						result.success(true)
+					}
+					"saveToken" -> {
+						val token = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "token missing", null)
+						secureSessionStore.saveToken(token)
+						result.success(true)
+					}
+					"saveRefreshToken" -> {
+						val token = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "token missing", null)
+						secureSessionStore.saveRefreshToken(token)
+						result.success(true)
+					}
+					"getRefreshToken" -> result.success(secureSessionStore.getRefreshToken())
+					"saveUserId" -> {
+						val userId = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "userId missing", null)
+						secureSessionStore.saveUserId(userId)
+						result.success(true)
+					}
+					"getUserId" -> result.success(secureSessionStore.getUserId())
+					"saveTokenObject" -> {
+						val tokenObjectJson = call.arguments as? String ?: return@setMethodCallHandler result.error("ARG", "tokenObjectJson missing", null)
+						val tokenObject = SecureSessionStore.TokenObject.fromJsonString(tokenObjectJson)
+						secureSessionStore.saveTokenObject(tokenObject)
+						result.success(true)
+					}
+					"getTokenObject" -> result.success(secureSessionStore.getTokenObject()?.toJsonString())
+					else -> result.notImplemented()
+				}
+			} catch (e: Exception) {
+				result.error("SECURE_STORAGE", e.message ?: "secure storage operation failed", null)
+			}
+		}
 	}
 
 	private fun handleStartServer(arguments: Any?, result: MethodChannel.Result) {

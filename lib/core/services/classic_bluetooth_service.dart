@@ -112,24 +112,14 @@ class ClassicBluetoothService {
 
   Future<List<BluetoothDevice>> scanForDevices() async {
     try {
-      // Get both bonded devices and discover new ones
-      List<fbs.BluetoothDevice> devices = [];
-      
-      // First get bonded devices
+      // Only return devices discovered during the current scan session.
+      final Map<String, BluetoothDevice> discovered = {};
+
+      print('Starting device discovery...');
+
       try {
-        final bondedDevices = await _bluetooth.getBondedDevices();
-        devices.addAll(bondedDevices);
-        print('Found ${bondedDevices.length} bonded device(s)');
-      } catch (e) {
-        print('Error getting bonded devices: $e');
-      }
-      
-      // Then start discovery for new devices (timeout after 12 seconds)
-      try {
-        print('Starting device discovery...');
         final discoveryStream = _bluetooth.startDiscovery();
-        
-        // Listen to discovery stream for 12 seconds
+
         await discoveryStream.timeout(
           const Duration(seconds: 12),
           onTimeout: (sink) {
@@ -137,26 +127,20 @@ class ClassicBluetoothService {
             sink.close();
           },
         ).listen((result) {
-          // Results come through the stream
+          final device = result.device;
+          discovered[device.address] = BluetoothDevice(
+            address: device.address,
+            name: device.name ?? 'Unknown Device',
+          );
         }).asFuture();
       } catch (e) {
-        // Timeout is expected, so we ignore it
-        print('Discovery completed or timed out');
+        // Timeout/completion is expected after scan window.
+        print('Discovery completed or timed out: $e');
       }
-      
-      // Get bonded devices again to see if any new ones were added
-      try {
-        final bondedDevices = await _bluetooth.getBondedDevices();
-        devices = bondedDevices;
-        print('Found ${devices.length} total device(s) after discovery');
-      } catch (e) {
-        print('Error getting devices after discovery: $e');
-      }
-      
-      return devices.map((d) => BluetoothDevice(
-        address: d.address,
-        name: d.name ?? 'Unknown Device',
-      )).toList();
+
+      final devices = discovered.values.toList();
+      print('Found ${devices.length} discovered device(s) in current scan');
+      return devices;
     } catch (e) {
       print('Scan error: $e');
       return [];

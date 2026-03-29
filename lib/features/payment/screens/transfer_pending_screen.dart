@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/services/classic_bluetooth_service.dart';
 import '../../balance/services/storage_service.dart';
@@ -32,6 +33,12 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
   
   // Message reassembly buffer (for handling fragmented messages)
   final StringBuffer _messageBuffer = StringBuffer();
+
+  void _log(String message) {
+    if (kDebugMode) {
+      debugPrint(message);
+    }
+  }
 
   @override
   void initState() {
@@ -117,27 +124,27 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       if (_completed) return;
       try {
         final decodedChunk = utf8.decode(data);
-        print('[PAY-PENDING] Received chunk: $decodedChunk');
+        _log('[PAY-PENDING] Received bluetooth data chunk');
         
         _messageBuffer.write(decodedChunk);
         final bufferedMessage = _messageBuffer.toString();
         
         // Check if we have a complete JSON message
         if (_isCompleteMessage(bufferedMessage)) {
-          print('[PAY-PENDING] Complete message assembled');
+          _log('[PAY-PENDING] Complete message assembled');
           
           try {
             final decoded = jsonDecode(bufferedMessage) as Map<String, dynamic>;
             _messageBuffer.clear(); // Clear buffer after successful decode
             
-            print('[PAY-PENDING] Got response: $decoded');
+            _log('[PAY-PENDING] Received response message');
             
             if (decoded['type'] == 'payment_response') {
               final accepted = decoded['status'] == 'accepted';
               
               if (accepted) {
                 // Receiver accepted - now send the actual tokens
-                print('[PAY-PENDING] Receiver accepted, sending tokens...');
+                _log('[PAY-PENDING] Receiver accepted, sending tokens');
                 setState(() {
                   _status = 'Sending tokens...';
                 });
@@ -145,7 +152,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
                 await _sendTokens();
               } else {
                 // Receiver rejected - unlock tokens and revert
-                print('[PAY-PENDING] Receiver rejected, reverting...');
+                _log('[PAY-PENDING] Receiver rejected, reverting transaction');
                 await _revertTransaction();
                 
                 _completed = true;
@@ -168,7 +175,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
           }
         } else if (decoded['type'] == 'transfer_complete') {
           // Receiver confirmed token receipt and verification
-          print('[PAY-PENDING] Transfer complete, finalizing...');
+          _log('[PAY-PENDING] Transfer complete, finalizing');
           await _finalizeTransaction();
           
           _completed = true;
@@ -190,7 +197,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
           );
         } else if (decoded['type'] == 'transfer_cancelled_ack') {
           // Receiver acknowledged our cancellation
-          print('[PAY-PENDING] Receiver acknowledged cancellation');
+          _log('[PAY-PENDING] Receiver acknowledged cancellation');
           _completed = true;
           
           final message = decoded['message'] as String? ?? 'Transaction cancelled';
@@ -211,18 +218,18 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
           );
         }
           } catch (e) {
-            print('[PAY-PENDING] Failed to parse complete message: $e');
+            _log('[PAY-PENDING] Failed to parse complete message');
             _messageBuffer.clear(); // Clear on decode error
           }
         } else {
-          print('[PAY-PENDING] Partial message, waiting for more data... Buffer size: ${bufferedMessage.length}');
+          _log('[PAY-PENDING] Partial message, awaiting more data');
         }
       } catch (e) {
-        print('[PAY-PENDING] Failed to process chunk: $e');
+        _log('[PAY-PENDING] Failed to process incoming data chunk');
       }
     }, onError: (error) async {
       if (_completed) return;
-      print('[PAY-PENDING] Stream error: $error');
+      _log('[PAY-PENDING] Stream error occurred');
       
       // Revert transaction on connection error
       await _revertTransaction();
@@ -260,18 +267,18 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       };
 
       // Send tokens
-      print('[PAY-PENDING] Sending ${_tokens!.length} tokens...');
+      _log('[PAY-PENDING] Sending token transfer payload');
       await _classicService.sendBytes(
         _connectionHandle!,
         Uint8List.fromList(utf8.encode(jsonEncode(tokenTransfer))),
       );
-      print('[PAY-PENDING] Tokens sent');
+      _log('[PAY-PENDING] Token transfer payload sent');
       
       setState(() {
         _status = 'Tokens sent, waiting for confirmation...';
       });
     } catch (e) {
-      print('[PAY-PENDING] Error sending tokens: $e');
+      _log('[PAY-PENDING] Error sending tokens');
       await _revertTransaction();
       
       if (mounted) {
@@ -297,17 +304,17 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       if (_tokens != null) {
         final tokenIds = _tokens!.map((t) => t.tokenId).toList();
         await StorageService.removeTokens(tokenIds);
-        print('[PAY-PENDING] Removed ${tokenIds.length} tokens from storage');
+        _log('[PAY-PENDING] Updated sender token storage after transfer');
       }
 
       // Unlock (clear lock)
       await StorageService.unlockTokens();
-      print('[PAY-PENDING] Unlocked tokens');
+      _log('[PAY-PENDING] Token lock released');
 
       // Transaction remains as unsettled - will be settled when online sync happens
-      print('[PAY-PENDING] Transaction finalized successfully');
+      _log('[PAY-PENDING] Transaction finalized successfully');
     } catch (e) {
-      print('[PAY-PENDING] Error finalizing transaction: $e');
+      _log('[PAY-PENDING] Error finalizing transaction');
     }
   }
 
@@ -315,17 +322,17 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
     try {
       // Unlock tokens (make them available again)
       await StorageService.unlockTokens();
-      print('[PAY-PENDING] Unlocked tokens');
+      _log('[PAY-PENDING] Token lock released');
 
       // Remove unsettled transaction
       if (_txnId != null) {
         await TransactionStorageService.removeUnsettledTransaction(_txnId!);
-        print('[PAY-PENDING] Removed unsettled transaction');
+        _log('[PAY-PENDING] Removed unsettled transaction');
       }
 
-      print('[PAY-PENDING] Transaction reverted');
+      _log('[PAY-PENDING] Transaction reverted');
     } catch (e) {
-      print('[PAY-PENDING] Error reverting transaction: $e');
+      _log('[PAY-PENDING] Error reverting transaction');
     }
   }
 
@@ -382,7 +389,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       // Disconnect
       await _classicService.disconnect();
       
-      print('[PAY-PENDING] Transaction cancelled by user');
+      _log('[PAY-PENDING] Transaction cancelled by user');
       
       if (!mounted) return true;
       
@@ -405,7 +412,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         'timestamp': DateTime.now().toIso8601String(),
       };
       
-      print('[PAY-PENDING] Sending cancellation message: $cancelMessage');
+      _log('[PAY-PENDING] Sending cancellation message');
       
       await _classicService.sendBytes(
         _connectionHandle!,
@@ -414,9 +421,9 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         ),
       );
       
-      print('[PAY-PENDING] Cancellation message sent');
+      _log('[PAY-PENDING] Cancellation message sent');
     } catch (e) {
-      print('[PAY-PENDING] Failed to send cancellation message: $e');
+      _log('[PAY-PENDING] Failed to send cancellation message');
     }
   }
 
