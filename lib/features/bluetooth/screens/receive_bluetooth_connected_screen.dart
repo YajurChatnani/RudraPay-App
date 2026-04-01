@@ -1,12 +1,13 @@
+// Purpose: Receiver-side connected screen that accepts payloads and settles incoming tokens.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import '../../../core/services/classic_bluetooth_service.dart';
 import '../../../core/services/token_service.dart';
 import '../../balance/services/storage_service.dart';
-import '../../balance/services/transaction_storage_service.dart';
+import '../../transactions/services/transaction_storage_service.dart';
 import '../../balance/models/recharge_response.dart';
+import '../services/classic_bluetooth_service.dart';
 
 class ReceiveBluetoothConnectedScreen extends StatefulWidget {
   const ReceiveBluetoothConnectedScreen({super.key});

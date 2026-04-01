@@ -1,3 +1,4 @@
+// Purpose: Shows user profile details, identifiers, and account-related app metadata.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';

@@ -1,3 +1,4 @@
+// Purpose: Success-state UI shown after a completed transaction.
 import 'package:flutter/material.dart';
 
 class TransactionResultScreen extends StatelessWidget {

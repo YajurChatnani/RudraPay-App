@@ -1,10 +1,11 @@
+// Purpose: Payment amount entry flow that selects tokens and prepares transfer payload.
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../balance/services/storage_service.dart';
-import '../../balance/services/transaction_storage_service.dart';
-import '../../../core/services/classic_bluetooth_service.dart';
+import '../../transactions/services/transaction_storage_service.dart';
+import '../../bluetooth/services/classic_bluetooth_service.dart';
 import '../../../core/services/token_service.dart';
 
 class EnterAmountScreen extends StatefulWidget {

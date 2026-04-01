@@ -1,5 +1,6 @@
+// Purpose: Receiver-side Bluetooth discovery/connection screen before token exchange.
 import 'package:flutter/material.dart';
-import '../../../core/services/classic_bluetooth_service.dart';
+import '../services/classic_bluetooth_service.dart';
 import '../../../core/services/token_service.dart';
 
 class ReceiveBluetoothConnectingScreen extends StatefulWidget {

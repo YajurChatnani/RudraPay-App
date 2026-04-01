@@ -1,3 +1,4 @@
+// Purpose: Wraps encrypted platform storage operations for secure read/write/delete of sensitive values.
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 

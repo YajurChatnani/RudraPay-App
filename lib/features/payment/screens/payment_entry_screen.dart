@@ -1,3 +1,4 @@
+// Purpose: Entry screen for starting an outgoing payment flow.
 import 'package:flutter/material.dart';
 
 class PaymentEntryScreen extends StatelessWidget {

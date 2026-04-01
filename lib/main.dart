@@ -1,3 +1,4 @@
+// Purpose: App entry point that loads env config, preloads key material, and wires global routes.
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'features/home/screens/home_screen.dart';
@@ -18,6 +19,7 @@ import 'features/auth/screens/login_screen.dart';
 import 'features/auth/screens/signup_screen.dart';
 import 'features/auth/screens/onboarding_screen.dart';
 import 'core/config/app_config.dart';
+import 'features/balance/services/wallet_keypair_service.dart';
 import 'core/services/token_service.dart';
 
 Future<void> main() async {
@@ -32,6 +34,13 @@ Future<void> main() async {
     if (!config.isConfigured) {
       throw Exception(config.configError);
     }
+
+    // Generate/load wallet keypair once on startup.
+    // Keypair is persisted in secure storage and cached in memory.
+    // Ignore preload errors so app can still boot and show actionable UI errors later.
+    try {
+      await WalletKeyPairService.preloadDefaultNetworkKeyPair();
+    } catch (_) {}
     
     runApp(const WalletApp());
   } catch (e) {

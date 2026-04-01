@@ -1,5 +1,6 @@
+// Purpose: Sender-side Bluetooth connection progress screen for payment handoff.
 import 'package:flutter/material.dart';
-import '../../../core/services/classic_bluetooth_service.dart';
+import '../services/classic_bluetooth_service.dart';
 import '../../../core/services/token_service.dart';
 
 class PayBluetoothConnectingScreen extends StatefulWidget {

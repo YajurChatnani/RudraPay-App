@@ -1,3 +1,4 @@
+// Purpose: Post-signup onboarding form that collects profile details before registration.
 import 'package:flutter/material.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../core/services/auth_service.dart';
@@ -43,6 +44,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _register() async {
+    // Collect values from onboarding steps and previous screen.
     final name = _nameController.text.trim();
     final age = int.tryParse(_ageController.text.trim());
     final phone = _phoneController.text.trim();
@@ -60,6 +62,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     setState(() => _loading = true);
     try {
+      // Registration call now includes: name, age, gender, phoneNumber, email, password.
       await AuthService.register(
         name: name,
         age: age,
@@ -71,12 +74,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
     } on AppException catch (e) {
-      _showSnack(e.message);
+      // Map known API errors to user-friendly and stable UI messages.
+      _showSnack(_mapRegistrationError(e));
     } catch (e) {
       _showSnack(e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _mapRegistrationError(AppException error) {
+    // Keep explicit handling for duplicate account conflict style responses.
+    // Some backends may send slightly different variants for 400 messages.
+    final message = error.message.trim();
+    final normalized = message.toLowerCase();
+
+    if (error.code == 'BAD_REQUEST' &&
+        (normalized.contains('user already exists') ||
+            normalized.contains('already exists'))) {
+      return 'User already exists';
+    }
+
+    // Default path: show API message as-is to preserve backend diagnostics.
+    return message;
   }
 
   void _showSnack(String message) {

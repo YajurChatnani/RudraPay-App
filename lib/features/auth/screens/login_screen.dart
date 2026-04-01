@@ -1,4 +1,6 @@
+// Purpose: Login UI flow for identifier/password authentication and navigation.
 import 'package:flutter/material.dart';
+import '../../../core/errors/app_exception.dart';
 import '../../../core/services/auth_service.dart';
 import '../../home/screens/home_screen.dart';
 import 'signup_screen.dart';
@@ -39,6 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
+      // Backend accepts identifier as email or phone number.
       await AuthService.login(
         identifier: _usernameController.text,
         password: _passwordController.text,
@@ -50,9 +53,20 @@ class _LoginScreenState extends State<LoginScreen> {
         context,
         MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
+    } on AppException catch (e) {
+      if (!mounted) return;
+
+      // Show clean and predictable message for known API failures.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_mapLoginError(e)),
+          backgroundColor: Colors.red,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      
+
+      // Fallback for any unexpected runtime errors.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Login failed: ${e.toString()}'),
@@ -66,6 +80,37 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
+  }
+
+  String _mapLoginError(AppException error) {
+    // Normalize common backend response variants for login.
+    final message = error.message.trim();
+    final normalized = message.toLowerCase();
+
+    if (error.code == 'UNAUTHORIZED') {
+      return message.isEmpty ? 'Invalid credentials' : message;
+    }
+
+    if (error.code == 'BAD_REQUEST') {
+      if (normalized.contains('invalid credentials') ||
+          normalized.contains('invalid password') ||
+          normalized.contains('user not found') ||
+          normalized.contains('email not found') ||
+          normalized.contains('phone not found')) {
+        return 'Invalid credentials';
+      }
+      return message.isEmpty ? 'Invalid request' : message;
+    }
+
+    if (error.code == 'TIMEOUT') {
+      return 'Request timeout. Please try again.';
+    }
+
+    if (error.code == 'NETWORK_ERROR') {
+      return 'Network error. Please check your internet connection.';
+    }
+
+    return message.isEmpty ? 'Login failed' : message;
   }
 
   @override

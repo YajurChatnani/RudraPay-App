@@ -1,3 +1,4 @@
+// Purpose: Secure wallet storage for balance, tokens, limits, and token lock lifecycle.
 import 'dart:convert';
 import '../models/recharge_response.dart';
 import '../../../core/services/token_service.dart';
@@ -6,6 +7,8 @@ import '../../../core/services/secure_storage_service.dart';
 class StorageService {
   static const String _balanceKey = 'wallet_balance';
   static const String _tokensKey = 'wallet_tokens';
+  static const String _tokenIndexKey = 'wallet_token_index';
+  static const String _tokenItemPrefix = 'wallet_token';
   static const String _lockedTokensKey = 'locked_tokens';
   static const String _totalTokensKey = 'total_tokens_received';
   static const String _freeTokensUsedKey = 'free_tokens_used';
@@ -16,6 +19,26 @@ class StorageService {
     final user = await TokenService.getUser();
     final userId = user?.id ?? 'guest';
     return '${userId}_$baseKey';
+  }
+
+  static String _tokenStorageKey(String tokenId) => '${_tokenItemPrefix}_$tokenId';
+
+  static Future<List<String>> _getTokenIds() async {
+    final key = await _getUserKey(_tokenIndexKey);
+    final raw = await SecureStorageService.getString(key);
+    if (raw == null || raw.isEmpty) return [];
+
+    try {
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      return decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> _saveTokenIds(List<String> tokenIds) async {
+    final key = await _getUserKey(_tokenIndexKey);
+    await SecureStorageService.setString(key, jsonEncode(tokenIds));
   }
 
   /// Get current balance from storage
@@ -69,18 +92,29 @@ class StorageService {
   /// Save tokens to storage
   static Future<bool> saveTokens(List<Token> tokens) async {
     try {
-      final key = await _getUserKey(_tokensKey);
-      final tokensList = tokens.map((token) {
-        return {
-          'tokenId': token.tokenId,
-          'value': token.value,
-          'used': token.used,
-          'signature': token.signature,
-          'createdAt': token.createdAt,
-        };
-      }).toList();
-      final jsonString = jsonEncode(tokensList);
-      await SecureStorageService.setString(key, jsonString);
+      // Store each token in a separate encrypted record for compartmentalization.
+      final previousIds = await _getTokenIds();
+      final nextIds = tokens.map((t) => t.tokenId).toSet().toList();
+
+      for (final token in tokens) {
+        final itemKey = await _getUserKey(_tokenStorageKey(token.tokenId));
+        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      }
+
+      // Remove token records that are no longer part of the wallet state.
+      final removedIds = previousIds.where((id) => !nextIds.contains(id));
+      for (final tokenId in removedIds) {
+        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
+        await SecureStorageService.remove(itemKey);
+      }
+
+      await _saveTokenIds(nextIds);
+
+      // Keep legacy aggregate key in sync for backward compatibility while migrating.
+      final legacyKey = await _getUserKey(_tokensKey);
+      final legacyList = tokens.map((token) => token.toJson()).toList();
+      await SecureStorageService.setString(legacyKey, jsonEncode(legacyList));
+
       return true;
     } catch (e) {
       return false;
@@ -90,14 +124,52 @@ class StorageService {
   /// Get all tokens from storage
   static Future<List<Token>> getTokens() async {
     try {
-      final key = await _getUserKey(_tokensKey);
-      final jsonString = await SecureStorageService.getString(key);
-      if (jsonString == null) return [];
+      // Preferred path: read token index, then fetch each token record separately.
+      final tokenIds = await _getTokenIds();
+      if (tokenIds.isNotEmpty) {
+        final tokens = <Token>[];
+        final validIds = <String>[];
+
+        for (final tokenId in tokenIds) {
+          final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
+          final raw = await SecureStorageService.getString(itemKey);
+          if (raw == null || raw.isEmpty) {
+            continue;
+          }
+          try {
+            final map = jsonDecode(raw) as Map<String, dynamic>;
+            final token = Token.fromJson(map);
+            if (token.tokenId.isNotEmpty) {
+              tokens.add(token);
+              validIds.add(token.tokenId);
+            }
+          } catch (_) {
+            // Skip malformed token record and continue loading remaining ones.
+          }
+        }
+
+        // Compact index if some token records were missing/corrupted.
+        if (validIds.length != tokenIds.length) {
+          await _saveTokenIds(validIds);
+        }
+
+        return tokens;
+      }
+
+      // Fallback path for legacy storage where tokens were a single JSON array.
+      final legacyKey = await _getUserKey(_tokensKey);
+      final jsonString = await SecureStorageService.getString(legacyKey);
+      if (jsonString == null || jsonString.isEmpty) return [];
 
       final List<dynamic> jsonList = jsonDecode(jsonString);
-      return jsonList
+      final tokens = jsonList
           .map((item) => Token.fromJson(item as Map<String, dynamic>))
+          .where((t) => t.tokenId.isNotEmpty)
           .toList();
+
+      // Migrate legacy aggregate format into per-token encrypted records.
+      await saveTokens(tokens);
+      return tokens;
     } catch (e) {
       return [];
     }
@@ -129,6 +201,11 @@ class StorageService {
     try {
       await SecureStorageService.remove(await _getUserKey(_balanceKey));
       await SecureStorageService.remove(await _getUserKey(_tokensKey));
+      final tokenIds = await _getTokenIds();
+      for (final tokenId in tokenIds) {
+        await SecureStorageService.remove(await _getUserKey(_tokenStorageKey(tokenId)));
+      }
+      await SecureStorageService.remove(await _getUserKey(_tokenIndexKey));
       await SecureStorageService.remove(await _getUserKey(_totalTokensKey));
       await SecureStorageService.remove(await _getUserKey(_freeTokensUsedKey));
       await SecureStorageService.remove(await _getUserKey(_lockedTokensKey));

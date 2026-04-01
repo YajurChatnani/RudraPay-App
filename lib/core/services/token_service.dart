@@ -1,3 +1,4 @@
+// Purpose: Manages auth session persistence (JWT, user payload, and related token fields).
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
@@ -10,6 +11,9 @@ class TokenService {
   static const String _userIdKey = 'user_id';
 
   static Future<void> saveSession(String token, User user) async {
+    // User object is serialized before persisting.
+    // SecureStorageService uses platform secure storage (encrypted at-rest)
+    // on supported mobile targets.
     final userJson = jsonEncode(user.toJson());
     await SecureStorageService.setString(_tokenKey, token);
     await SecureStorageService.setString(_userKey, userJson);
@@ -21,6 +25,7 @@ class TokenService {
   }
 
   static Future<User?> getUser() async {
+    // Read encrypted user payload and deserialize it back into User model.
     final jsonString = await SecureStorageService.getString(_userKey);
 
     if (jsonString == null) return null;

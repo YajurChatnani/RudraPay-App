@@ -1,3 +1,4 @@
+// Purpose: Defines the user domain model and JSON conversion helpers used by auth/session flows.
 class User {
   final String id;
   final String name;

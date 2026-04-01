@@ -1,3 +1,4 @@
+// Purpose: Renders signup form UI and routes valid credentials into onboarding.
 import 'package:flutter/material.dart';
 
 class SignupScreen extends StatefulWidget {

@@ -1,3 +1,4 @@
+// Purpose: Failure-state UI shown when a transaction cannot be completed.
 import 'package:flutter/material.dart';
 
 class TransactionFailScreen extends StatelessWidget {

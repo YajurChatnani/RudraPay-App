@@ -1,3 +1,4 @@
+// Purpose: Entry screen for initiating incoming transfer over Bluetooth.
 import 'package:flutter/material.dart';
 
 class ReceiveEntryScreen extends StatelessWidget {

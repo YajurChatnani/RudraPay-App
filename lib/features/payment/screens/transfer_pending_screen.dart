@@ -1,11 +1,12 @@
+// Purpose: Pending transfer screen that performs Bluetooth exchange and awaits settlement.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../../../core/services/classic_bluetooth_service.dart';
+import '../../bluetooth/services/classic_bluetooth_service.dart';
 import '../../balance/services/storage_service.dart';
-import '../../balance/services/transaction_storage_service.dart';
+import '../../transactions/services/transaction_storage_service.dart';
 import '../../balance/models/recharge_response.dart' show Token;
 
 class TransferPendingScreen extends StatefulWidget {

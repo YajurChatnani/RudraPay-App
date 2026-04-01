@@ -1,3 +1,4 @@
+// Purpose: Stores and retrieves local transaction records with settled/unsettled status.
 import 'dart:math';
 import '../../../core/services/token_service.dart';
 

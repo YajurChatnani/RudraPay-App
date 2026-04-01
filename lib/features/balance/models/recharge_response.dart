@@ -1,3 +1,4 @@
+// Purpose: Recharge response and token models preserving immutable/issuer/mutable token schema.
 class RechargeResponse {
   final bool success;
   final String message;
@@ -14,51 +15,103 @@ class RechargeResponse {
   });
 
   factory RechargeResponse.fromJson(Map<String, dynamic> json) {
+    final parsedTokens = (json['tokens'] as List<dynamic>?)
+            ?.map((t) => Token.fromJson(t as Map<String, dynamic>))
+            .toList() ??
+        [];
+
     return RechargeResponse(
       success: json['success'] ?? false,
-      message: json['message'] ?? '',
-      userId: json['userId'] ?? '',
-      totalTokens: json['totalTokens'] ?? 0,
-      tokens: (json['tokens'] as List<dynamic>?)
-              ?.map((t) => Token.fromJson(t as Map<String, dynamic>))
-              .toList() ??
-          [],
+      message: (json['message'] ?? json['msg'] ?? 'Recharge successful').toString(),
+      userId: (json['userId'] ?? '').toString(),
+      totalTokens: (json['totalTokens'] as int?) ?? parsedTokens.length,
+      tokens: parsedTokens,
     );
   }
 }
 
 class Token {
-  final String tokenId;
-  final int value;
-  final bool used;
-  final String signature;
-  final String createdAt;
+  // Stored exactly as backend schema for secure persistence and future replay.
+  final Map<String, dynamic> immutable;
+  final Map<String, dynamic> issuer;
+  final Map<String, dynamic> mutable;
 
   Token({
-    required this.tokenId,
-    required this.value,
-    required this.used,
-    required this.signature,
-    required this.createdAt,
+    required this.immutable,
+    required this.issuer,
+    required this.mutable,
   });
 
+  // Derived helpers used by existing wallet logic.
+  String get tokenId => (immutable['token_id'] ?? '').toString();
+
+  int get value {
+    final raw = immutable['value'];
+    if (raw is int) return raw;
+    return int.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+
+  bool get used {
+    final status = (mutable['status'] ?? '').toString().toUpperCase();
+    return status == 'SPENT';
+  }
+
+  String get signature => (issuer['signature'] ?? '').toString();
+
+  String get createdAt {
+    final mintInfo = immutable['mint_info'];
+    if (mintInfo is Map) {
+      return (mintInfo['timestamp'] ?? '').toString();
+    }
+    return '';
+  }
+
   factory Token.fromJson(Map<String, dynamic> json) {
+    // New backend shape nests fields inside immutable/issuer/mutable blocks.
+    final immutableMap = json['immutable'] is Map
+        ? Map<String, dynamic>.from(json['immutable'] as Map)
+        : <String, dynamic>{
+            'token_id': (json['tokenId'] ?? '').toString(),
+            'value': json['value'] ?? 0,
+            'mint_info': {
+              'timestamp': int.tryParse((json['createdAt'] ?? '').toString()) ??
+                  DateTime.now().millisecondsSinceEpoch,
+              'expiry': null,
+            },
+          };
+
+    final issuerMap = json['issuer'] is Map
+        ? Map<String, dynamic>.from(json['issuer'] as Map)
+        : <String, dynamic>{
+            'server_id': (json['issuerServerId'] ?? '').toString(),
+            'signature': (json['signature'] ?? '').toString(),
+          };
+
+    final mutableMap = json['mutable'] is Map
+        ? Map<String, dynamic>.from(json['mutable'] as Map)
+        : <String, dynamic>{
+            'owner': {'public_key': null},
+            'status': (json['used'] == true) ? 'SPENT' : 'UNSPENT',
+            'lock_info': {
+              'locked_to': null,
+              'lock_timestamp': null,
+              'lock_signature': null,
+            },
+          };
+
     return Token(
-      tokenId: json['tokenId'] ?? '',
-      value: json['value'] ?? 0,
-      used: json['used'] ?? false,
-      signature: json['signature'] ?? '',
-      createdAt: json['createdAt'] ?? '',
+      immutable: immutableMap,
+      issuer: issuerMap,
+      mutable: mutableMap,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'tokenId': tokenId,
-      'value': value,
-      'used': used,
-      'signature': signature,
-      'createdAt': createdAt,
+      // Persist exactly in backend schema requested by server protocol.
+      'immutable': immutable,
+      'issuer': issuer,
+      'mutable': mutable,
     };
   }
 }

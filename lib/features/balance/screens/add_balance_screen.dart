@@ -1,3 +1,4 @@
+// Purpose: Collects recharge amount/method and starts the wallet recharge request flow.
 import 'package:flutter/material.dart';
 import '../../../core/errors/app_exception.dart';
 import '../services/wallet_service.dart';

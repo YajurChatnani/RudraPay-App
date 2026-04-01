@@ -1,3 +1,4 @@
+// Purpose: Presents full details for a single transaction record.
 import 'package:flutter/material.dart';
 
 class TransactionDetailScreen extends StatelessWidget {

@@ -1,6 +1,7 @@
+// Purpose: Transactions list UI for browsing settled and unsettled records.
 import 'package:flutter/material.dart';
 import 'dart:math';
-import '../../balance/services/transaction_storage_service.dart';
+import '../services/transaction_storage_service.dart';
 
 class TransactionsListScreen extends StatefulWidget {
   const TransactionsListScreen({super.key});

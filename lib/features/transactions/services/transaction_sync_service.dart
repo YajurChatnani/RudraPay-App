@@ -1,12 +1,13 @@
+// Purpose: Syncs unsettled transactions with server and reconciles local settlement state.
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'token_service.dart';
-import '../../features/balance/services/transaction_storage_service.dart';
-import '../../features/balance/services/storage_service.dart';
-import '../../features/balance/models/recharge_response.dart';
+import '../../../core/services/token_service.dart';
+import '../../balance/models/recharge_response.dart';
+import '../../balance/services/storage_service.dart';
+import 'transaction_storage_service.dart';
 
-class SyncService {
+class TransactionSyncService {
   static const String _baseUrl = 'https://wallet-api-77kp.onrender.com';
 
   static void _log(String message) {

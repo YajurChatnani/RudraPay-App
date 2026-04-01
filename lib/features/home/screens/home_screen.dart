@@ -1,9 +1,10 @@
+// Purpose: Home dashboard showing wallet summary, recent activity, and manual sync actions.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../balance/services/storage_service.dart';
-import '../../balance/services/transaction_storage_service.dart';
+import '../../transactions/services/transaction_sync_service.dart';
+import '../../transactions/services/transaction_storage_service.dart';
 import '../../../core/services/token_service.dart';
-import '../../../core/services/sync_service.dart';
 import '../../../core/models/user_model.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -99,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final success = await SyncService.syncTransactions();
+      final success = await TransactionSyncService.syncTransactions();
       
       if (success && mounted) {
         // Reload balance and transactions

@@ -1,3 +1,4 @@
+// Purpose: Defines app-specific exception classes and error metadata for consistent UI handling.
 import 'package:flutter/material.dart';
 
 class AppException implements Exception {

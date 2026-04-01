@@ -1,3 +1,4 @@
+// Purpose: Implements classic Bluetooth discovery, connection, and message exchange primitives.
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
