@@ -12,6 +12,7 @@
     <!-- Location permissions (needed for discovery permission dialog surfaced by permission_handler) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <application
         android:label="RudraPay"

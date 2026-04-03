@@ -117,7 +117,7 @@ class PaymentEntryScreen extends StatelessWidget {
           height: 120,
           width: 120,
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFFFF).withOpacity(0.06),
+            color: const Color(0xFFFFFFFF).withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white12, width: 1),
           ),

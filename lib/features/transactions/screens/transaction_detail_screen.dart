@@ -96,8 +96,8 @@ class TransactionDetailScreen extends StatelessWidget {
                         horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(14),
-                      color: statusColor.withOpacity(0.16),
-                      border: Border.all(color: statusColor.withOpacity(0.4)),
+                      color: statusColor.withValues(alpha: 0.16),
+                      border: Border.all(color: statusColor.withValues(alpha: 0.4)),
                     ),
                     child: Text(
                       status,

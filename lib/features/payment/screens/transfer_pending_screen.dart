@@ -1,11 +1,13 @@
 // Purpose: Pending transfer screen that performs Bluetooth exchange and awaits settlement.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../bluetooth/services/classic_bluetooth_service.dart';
 import '../../balance/services/storage_service.dart';
+import '../../balance/services/token_lock_service.dart';
+import '../../balance/services/wallet_keypair_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../balance/models/recharge_response.dart' show Token;
 
@@ -28,9 +30,11 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
   String? _deviceName;
   int? _amount;
   String? _txnId;
+  String? _qrPayload;
   List<Token>? _tokens;
   String? _receiverName;
   String _status = 'Waiting for receiver to respond...';
+  bool _showUnlockQr = false;
   
   // Message reassembly buffer (for handling fragmented messages)
   final StringBuffer _messageBuffer = StringBuffer();
@@ -59,6 +63,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       _deviceName = args?['deviceName'] as String?;
       _amount = args?['amount'] as int?;
       _txnId = args?['txnId'] as String?;
+      _qrPayload = args?['qrPayload'] as String?;
       
       // Parse tokens from JSON
       final tokensJson = args?['tokens'] as List<dynamic>?;
@@ -144,8 +149,58 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
               final accepted = decoded['status'] == 'accepted';
               
               if (accepted) {
-                // Receiver accepted - now send the actual tokens
-                _log('[PAY-PENDING] Receiver accepted, sending tokens');
+                // Receiver accepted - extract their public key and re-lock tokens
+                _log('[PAY-PENDING] Receiver accepted, extracting receiver pubkey');
+                final receiverPubKey = decoded['receiverPubKey'] as String?;
+                
+                if (receiverPubKey == null || receiverPubKey.isEmpty) {
+                  _log('[PAY-PENDING ERROR] Receiver did not provide public key');
+                  throw Exception('Receiver public key not received');
+                }
+                
+                _log('[PAY-PENDING] Receiver pubkey received, re-locking tokens with correct pubkey');
+                
+                // Re-lock tokens with correct receiver public key
+                if (_tokens != null && _txnId != null) {
+                  try {
+                    // First, change tokens back to UNSPENT so they can be re-locked
+                    final tokensToRelock = _tokens!.map((token) {
+                      final nextMutable = Map<String, dynamic>.from(token.mutable);
+                      nextMutable['status'] = 'UNSPENT';
+                      nextMutable.remove('lock_info'); // Remove old lock info
+                      return Token(
+                        immutable: token.immutable,
+                        issuer: token.issuer,
+                        mutable: nextMutable,
+                      );
+                    }).toList();
+
+                    // Re-lock with correct receiver public key
+                    final senderKeyPair = await WalletKeyPairService.getOrCreateKeyPair();
+                    final relockResult = TokenLockService.lockTokens(
+                      tokens: tokensToRelock,
+                      senderPrivKey: senderKeyPair.privateKeyPem,
+                      receiverPubKey: receiverPubKey,
+                      txnId: _txnId,
+                    );
+                    
+                    _log('[PAY-PENDING] Tokens re-locked with correct receiver pubkey');
+                    
+                    // Update in-memory tokens and QR payload
+                    setState(() {
+                      _tokens = relockResult.updatedTokens;
+                      _qrPayload = relockResult.transactionBundle.toQrPayloadString();
+                    });
+                    
+                    _log('[PAY-PENDING] Updated tokens and QR payload');
+                  } catch (e) {
+                    _log('[PAY-PENDING ERROR] Failed to re-lock tokens: $e');
+                    throw Exception('Failed to re-lock tokens: $e');
+                  }
+                }
+                
+                // Now send the re-locked tokens
+                _log('[PAY-PENDING] Sending re-locked tokens');
                 setState(() {
                   _status = 'Sending tokens...';
                 });
@@ -258,12 +313,14 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         throw Exception('Missing tokens or connection handle');
       }
 
+      final transportTokens = _tokens!.map(_normalizeTokenForTransfer).toList(growable: false);
+
       // Prepare token transfer payload
       final tokenTransfer = {
         'type': 'token_transfer',
         'txnId': _txnId,
         'amount': _amount,
-        'tokens': _tokens!.map((t) => t.toJson()).toList(),
+        'tokens': transportTokens.map((t) => t.toJson()).toList(),
         'timestamp': DateTime.now().toIso8601String(),
       };
 
@@ -273,10 +330,17 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         _connectionHandle!,
         Uint8List.fromList(utf8.encode(jsonEncode(tokenTransfer))),
       );
+
+      if (_txnId != null) {
+        await StorageService.markLockedTokensAsSpent(_txnId!);
+      }
       _log('[PAY-PENDING] Token transfer payload sent');
       
       setState(() {
-        _status = 'Tokens sent, waiting for confirmation...';
+        _showUnlockQr = _qrPayload != null && _qrPayload!.isNotEmpty;
+        _status = _showUnlockQr
+            ? 'Show this QR to receiver to unlock tokens...'
+            : 'Tokens sent, waiting for confirmation...';
       });
     } catch (e) {
       _log('[PAY-PENDING] Error sending tokens');
@@ -297,6 +361,30 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         );
       }
     }
+  }
+
+  Token _normalizeTokenForTransfer(Token token) {
+    if (token.immutable.isNotEmpty) {
+      return token;
+    }
+
+    final tokenId = token.tokenId;
+    final value = token.value;
+    final fallbackImmutable = <String, dynamic>{
+      'token_id': tokenId,
+      'value': value,
+      'mint_info': {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'expiry': null,
+      },
+    };
+
+    _log('[PAY-PENDING] Normalized legacy token payload for transfer tokenId=$tokenId value=$value');
+    return Token(
+      immutable: fallbackImmutable,
+      issuer: Map<String, dynamic>.from(token.issuer),
+      mutable: Map<String, dynamic>.from(token.mutable),
+    );
   }
 
   Future<void> _finalizeTransaction() async {
@@ -496,6 +584,45 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
                   color: Colors.white54,
                 ),
               ),
+
+              if (_showUnlockQr && _qrPayload != null) ...[
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Unlock QR',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      QrImageView(
+                        data: _qrPayload!,
+                        version: QrVersions.auto,
+                        size: 220,
+                        backgroundColor: Colors.white,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Txn: ${_txnId ?? '-'}',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

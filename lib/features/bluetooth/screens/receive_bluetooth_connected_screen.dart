@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../../core/services/token_service.dart';
 import '../../balance/services/storage_service.dart';
+import '../../balance/services/wallet_keypair_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../balance/models/recharge_response.dart';
 import '../services/classic_bluetooth_service.dart';
@@ -428,6 +429,19 @@ class _ReceiveBluetoothConnectedScreenState
           .toList();
 
       print('[RECEIVE-CONNECTED] Received ${tokens.length} tokens');
+      for (final token in tokens) {
+        final lockInfo = token.mutable['lock_info'];
+        final txn = lockInfo is Map ? (lockInfo['txn_id'] ?? '').toString() : '';
+        final lockedTo = lockInfo is Map ? (lockInfo['locked_to'] ?? '').toString() : '';
+        final status = (token.mutable['status'] ?? '').toString();
+        print(
+          '[RECEIVE-CONNECTED] Locked token received: tokenId=${token.tokenId}, value=${token.value}, status=$status, txn_id=$txn, locked_to=$lockedTo',
+        );
+
+        if (token.tokenId.isEmpty) {
+          print('[RECEIVE-CONNECTED WARN] Incoming locked token missing token_id (legacy sender payload).');
+        }
+      }
 
       // Verify token count matches amount
       if (tokens.length != amount) {
@@ -438,9 +452,19 @@ class _ReceiveBluetoothConnectedScreenState
         _statusMessage = 'Verifying tokens...';
       });
 
-      // Lock tokens as unsettled (don't add to main balance yet)
-      await StorageService.lockTokens(txnId, tokens);
-      print('[RECEIVE-CONNECTED] Locked ${tokens.length} tokens as unsettled');
+      final persisted = await StorageService.addOrUpdateTokens(tokens);
+      if (!persisted) {
+        throw Exception('Failed to persist locked tokens on receiver');
+      }
+      final byTxn = await StorageService.getTokensByTxnId(txnId);
+      print('[RECEIVE-CONNECTED] Stored ${tokens.length} locked tokens for QR unlock; queryByTxn=${byTxn.length}');
+      for (final token in byTxn) {
+        final lockInfo = token.mutable['lock_info'];
+        final expiry = lockInfo is Map ? (lockInfo['lock_expiry'] ?? '').toString() : '';
+        print(
+          '[RECEIVE-CONNECTED] Locked token in storage: tokenId=${token.tokenId}, value=${token.value}, txn_id=$txnId, lock_expiry=$expiry',
+        );
+      }
 
       // Save as unsettled transaction (credit for receiver)
       await TransactionStorageService.saveUnsettledTransaction(
@@ -461,7 +485,7 @@ class _ReceiveBluetoothConnectedScreenState
 
       setState(() {
         _isProcessing = false;
-        _statusMessage = 'Transfer complete!';
+        _statusMessage = 'Tokens received. Scan sender QR to unlock.';
       });
 
       // Check if cancelled before showing success
@@ -474,15 +498,12 @@ class _ReceiveBluetoothConnectedScreenState
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(
           context,
-          '/transaction/result',
+          '/receive/accept',
           (route) => false,
           arguments: {
+            'expectedTxnId': txnId,
+            'senderName': _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
             'amount': amount,
-            'otherPartyName': _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
-            'txnId': txnId,
-            'method': 'Bluetooth',
-            'message': 'Payment received successfully',
-            'isReceiver': true,
           },
         );
       }
@@ -515,16 +536,26 @@ class _ReceiveBluetoothConnectedScreenState
         return;
       }
 
+      // Get receiver's public key to send to sender
+      String? receiverPubKey;
+      try {
+        final keyPair = await WalletKeyPairService.getOrCreateKeyPair();
+        receiverPubKey = keyPair.publicKeyPem;
+      } catch (e) {
+        print('[RECEIVE-CONNECTED WARN] Failed to load receiver public key: $e');
+      }
+
       final response = {
         'type': 'payment_response',
         'status': accepted ? 'accepted' : 'rejected',
         'txnId': request['txnId'],
         'amount': request['amount'],
         'receiverName': _userName,
+        'receiverPubKey': receiverPubKey,
         'message': message,
       };
 
-      print('[RECEIVE-CONNECTED] Sending response: $response');
+      print('[RECEIVE-CONNECTED] Sending response with receiverPubKey: $response');
       await _classicService.sendBytes(
         _connectionHandle!,
         Uint8List.fromList(utf8.encode(jsonEncode(response))),

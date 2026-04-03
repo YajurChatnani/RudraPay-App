@@ -1,5 +1,6 @@
 // Purpose: Recharge API client that requests tokens, verifies them, and retries missing counts.
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_exception.dart';
@@ -58,6 +59,14 @@ class WalletService {
         final incomingTokens = response.tokens;
         if (incomingTokens.isEmpty) {
           throw AppException.server('Recharge returned no tokens for remaining amount: $remaining');
+        }
+
+        for (final token in incomingTokens) {
+          if (kDebugMode) {
+            debugPrint(
+              '[RECHARGE] Token from server: tokenId=${token.tokenId}, value=${token.value}, status=${token.mutable['status']}',
+            );
+          }
         }
 
         final verificationResults = await TokenVerificationService.verifyTokens(incomingTokens);

@@ -6,7 +6,7 @@ import '../../home/screens/home_screen.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: _accent.withOpacity(0.35),
+                                color: _accent.withValues(alpha: 0.35),
                                 blurRadius: 24,
                                 spreadRadius: 2,
                               ),

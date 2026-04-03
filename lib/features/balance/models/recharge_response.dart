@@ -24,9 +24,14 @@ class RechargeResponse {
       success: json['success'] ?? false,
       message: (json['message'] ?? json['msg'] ?? 'Recharge successful').toString(),
       userId: (json['userId'] ?? '').toString(),
-      totalTokens: (json['totalTokens'] as int?) ?? parsedTokens.length,
+      totalTokens: _asInt(json['totalTokens']) ?? parsedTokens.length,
       tokens: parsedTokens,
     );
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
   }
 }
 
@@ -43,10 +48,17 @@ class Token {
   });
 
   // Derived helpers used by existing wallet logic.
-  String get tokenId => (immutable['token_id'] ?? '').toString();
+  String get tokenId {
+    return (immutable['token_id'] ??
+            immutable['tokenId'] ??
+            mutable['token_id'] ??
+            mutable['tokenId'] ??
+            '')
+        .toString();
+  }
 
   int get value {
-    final raw = immutable['value'];
+    final raw = immutable['value'] ?? mutable['value'];
     if (raw is int) return raw;
     return int.tryParse(raw?.toString() ?? '') ?? 0;
   }
@@ -71,7 +83,7 @@ class Token {
     final immutableMap = json['immutable'] is Map
         ? Map<String, dynamic>.from(json['immutable'] as Map)
         : <String, dynamic>{
-            'token_id': (json['tokenId'] ?? '').toString(),
+            'token_id': (json['token_id'] ?? json['tokenId'] ?? '').toString(),
             'value': json['value'] ?? 0,
             'mint_info': {
               'timestamp': int.tryParse((json['createdAt'] ?? '').toString()) ??
@@ -93,9 +105,12 @@ class Token {
             'owner': {'public_key': null},
             'status': (json['used'] == true) ? 'SPENT' : 'UNSPENT',
             'lock_info': {
+              'txn_id': null,
               'locked_to': null,
+              'lock_hash': null,
+              'encrypted_payload': null,
               'lock_timestamp': null,
-              'lock_signature': null,
+              'lock_expiry': null,
             },
           };
 

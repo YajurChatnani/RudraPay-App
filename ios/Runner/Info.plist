@@ -49,5 +49,7 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>NSCameraUsageDescription</key>
+		<string>Camera access is required to scan unlock QR codes for token transfers.</string>
 	</dict>
 </plist>

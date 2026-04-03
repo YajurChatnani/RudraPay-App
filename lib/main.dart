@@ -5,6 +5,7 @@ import 'features/home/screens/home_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
 import 'features/payment/screens/payment_entry_screen.dart';
 import 'features/receive/screens/receive_entry_screen.dart';
+import 'features/receive/screens/accept_payment_qr_screen.dart';
 import 'features/transactions/screens/transactions_list_screen.dart';
 import 'features/bluetooth/screens/pay_bluetooth_connecting_screen.dart';
 import 'features/bluetooth/screens/receive_bluetooth_connecting_screen.dart';
@@ -116,6 +117,9 @@ Route _routeBuilder(RouteSettings settings) {
       break;
     case '/receive':
       page = const ReceiveEntryScreen();
+      break;
+    case '/receive/accept':
+      page = const AcceptPaymentQrScreen();
       break;
     case '/transactions':
       page = const TransactionsListScreen();

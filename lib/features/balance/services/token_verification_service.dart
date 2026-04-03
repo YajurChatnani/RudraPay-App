@@ -1,10 +1,8 @@
 // Purpose: Verifies token signatures against immutable payload using server RSA public key.
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
-import 'package:pointycastle/asymmetric/api.dart';
-import 'package:pointycastle/export.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/recharge_response.dart';
 
@@ -36,7 +34,9 @@ TOW3m5OOITyQDk3HAZnPIyBjxV37mMbvpNlC0udkYSA+g4tkQJSvVchVI+/ytwlM
   static RSAPublicKey? _cachedPublicKey;
 
   static void _log(String message) {
-    print('[TOKEN_VERIFY] $message');
+    if (kDebugMode) {
+      debugPrint('[TOKEN_VERIFY] $message');
+    }
   }
 
   // Easy-to-call helper when caller only needs a boolean result.

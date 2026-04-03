@@ -398,7 +398,7 @@ class _OnboardingStep extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: accent.withOpacity(0.35),
+                  color: accent.withValues(alpha: 0.35),
                   blurRadius: 22,
                   spreadRadius: 2,
                 ),

@@ -13,7 +13,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
   bool _obscure = true;
-  bool _loading = false;
+  final bool _loading = false;
   bool _acceptTerms = false;
 
   final Color _accent = const Color(0xFFE8FF3C);
@@ -202,7 +202,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: _accent.withOpacity(0.35),
+                              color: _accent.withValues(alpha: 0.35),
                               blurRadius: 24,
                               spreadRadius: 2,
                             ),

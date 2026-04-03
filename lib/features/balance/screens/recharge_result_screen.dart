@@ -27,24 +27,25 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
   @override
   void initState() {
     super.initState();
-    // In a real app, fetch current balance from a state management solution
-    // For now, we'll use the added amount as the new balance
-    _newBalance = widget.addedAmount;
+    _newBalance = 0;
     _saveTokensAndBalance();
   }
 
   Future<void> _saveTokensAndBalance() async {
-    // Save tokens to storage
-    await StorageService.saveTokens(widget.response.tokens);
+    // Merge newly recharged tokens with existing wallet state.
+    final saved = await StorageService.addOrUpdateTokens(widget.response.tokens);
+    if (!saved) {
+      print('[RECHARGE] Failed to persist recharged tokens');
+      return;
+    }
 
-    // Update balance in storage
-    final newBalance = await StorageService.addBalance(widget.response.totalTokens);
+    // Read final balance from storage after merge-write.
+    final newBalance = await StorageService.getBalance();
+    print('[RECHARGE] Persisted tokens=${widget.response.tokens.length}, balance=$newBalance');
 
     // Save total tokens received
     final currentTotal = await StorageService.getTotalTokensReceived();
-    await StorageService.saveTotalTokensReceived(
-      currentTotal + widget.response.totalTokens,
-    );
+    await StorageService.saveTotalTokensReceived(currentTotal + widget.response.totalTokens);
 
     // Create a settled transaction for server-added balance
     try {

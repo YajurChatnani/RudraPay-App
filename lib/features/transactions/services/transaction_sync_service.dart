@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/services/token_service.dart';
-import '../../balance/models/recharge_response.dart';
 import '../../balance/services/storage_service.dart';
 import 'transaction_storage_service.dart';
 
@@ -188,23 +187,11 @@ class TransactionSyncService {
     for (final txn in transactions) {
       try {
         final txnId = txn['txnId'] as String;
-        final amount = txn['amount'] as int;
         final type = txn['type'] as String;
 
         if (type == 'credit') {
-          // Receiver: check if tokens are locked for this transaction
-          if (!tokensSettled && lockedData != null && lockedData['txnId'] == txnId) {
-            // This transaction has locked tokens, unlock and add them
-            final tokensList = lockedData['tokens'] as List;
-            final tokens = tokensList.map((t) => Token.fromJson(t as Map<String, dynamic>)).toList();
-            
-            await StorageService.unlockTokens();
-            await StorageService.addTokens(tokens);
-            tokensSettled = true;
-            _log('[SYNC] Settled credit transaction');
-          } else {
-            _log('[SYNC] Credit transaction did not require token settlement');
-          }
+          // Receiver unlock is now QR-driven and persisted during local unlock flow.
+          _log('[SYNC] Credit transaction settlement handled by QR unlock flow');
         } else if (type == 'debit') {
           // Sender: check if tokens are locked for this transaction
           if (!tokensSettled && lockedData != null && lockedData['txnId'] == txnId) {

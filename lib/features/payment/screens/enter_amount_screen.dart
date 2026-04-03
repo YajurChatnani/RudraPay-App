@@ -1,11 +1,12 @@
 // Purpose: Payment amount entry flow that selects tokens and prepares transfer payload.
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../balance/services/storage_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../bluetooth/services/classic_bluetooth_service.dart';
+import '../../balance/services/wallet_keypair_service.dart';
+import '../../balance/services/token_lock_service.dart';
 import '../../../core/services/token_service.dart';
 
 class EnterAmountScreen extends StatefulWidget {
@@ -111,8 +112,17 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
 
       print('[ENTER-AMOUNT] Generated txnId: $txnId');
 
+      final senderKeyPair = await WalletKeyPairService.getOrCreateKeyPair();
+      final receiverPubKey = (_connectionAddress ?? _deviceName).toString();
+      final lockResult = TokenLockService.lockTokens(
+        tokens: tokensToSend,
+        senderPrivKey: senderKeyPair.privateKeyPem,
+        receiverPubKey: receiverPubKey,
+        txnId: txnId,
+      );
+
       // Lock tokens for transfer
-      await StorageService.lockTokens(txnId, tokensToSend);
+      await StorageService.lockTokens(txnId, lockResult.updatedTokens);
       print('[ENTER-AMOUNT] Locked $amt tokens');
 
       // Save as unsettled transaction (debit for sender)
@@ -150,7 +160,8 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
           'connectionHandle': _connectionHandle,
           'connectionAddress': _connectionAddress,
           'txnId': txnId,
-          'tokens': tokensToSend.map((t) => t.toJson()).toList(),
+          'tokens': lockResult.updatedTokens.map((t) => t.toJson()).toList(),
+          'qrPayload': lockResult.transactionBundle.toQrPayloadString(),
           'timestamp': timestamp,
         });
       }

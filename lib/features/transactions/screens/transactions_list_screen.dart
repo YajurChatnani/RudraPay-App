@@ -269,9 +269,9 @@ class TransactionItem extends StatelessWidget {
                               ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(12),
-                                color: const Color(0xFFE8FF3C).withOpacity(0.14),
+                                color: const Color(0xFFE8FF3C).withValues(alpha: 0.14),
                                 border: Border.all(
-                                  color: const Color(0xFFE8FF3C).withOpacity(0.35),
+                                  color: const Color(0xFFE8FF3C).withValues(alpha: 0.35),
                                 ),
                               ),
                               child: const Icon(

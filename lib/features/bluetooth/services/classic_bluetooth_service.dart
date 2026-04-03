@@ -1,7 +1,5 @@
 // Purpose: Implements classic Bluetooth discovery, connection, and message exchange primitives.
 import 'dart:async';
-import 'dart:typed_data';
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart' as fbs;
 import 'package:permission_handler/permission_handler.dart';
@@ -15,7 +13,6 @@ class ClassicBluetoothService {
   fbs.BluetoothConnection? _connection;
   fbs.BluetoothConnection? _serverConnection;
   StreamSubscription<Uint8List>? _dataSubscription;
-  StreamSubscription? _connectionSubscription;
   StreamSubscription? _nativeEventSub;
   final Map<int, StreamController<Uint8List>> _streamControllers = {};
   

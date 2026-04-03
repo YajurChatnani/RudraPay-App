@@ -323,6 +323,41 @@ class StorageService {
     }
   }
 
+  /// Mark all tokens in the locked transaction as SPENT.
+  static Future<bool> markLockedTokensAsSpent(String txnId) async {
+    try {
+      final key = await _getUserKey(_lockedTokensKey);
+      final jsonString = await SecureStorageService.getString(key);
+      if (jsonString == null || jsonString.isEmpty) return false;
+
+      final lockedData = jsonDecode(jsonString) as Map<String, dynamic>;
+      final currentTxnId = (lockedData['txnId'] ?? '').toString();
+      if (currentTxnId != txnId) return false;
+
+      final tokensRaw = lockedData['tokens'];
+      if (tokensRaw is! List) return false;
+
+      final updatedTokens = <Map<String, dynamic>>[];
+      for (final raw in tokensRaw) {
+        if (raw is! Map) continue;
+        final map = Map<String, dynamic>.from(raw);
+        final mutable = map['mutable'] is Map
+            ? Map<String, dynamic>.from(map['mutable'] as Map)
+            : <String, dynamic>{};
+        mutable['status'] = 'SPENT';
+        map['mutable'] = mutable;
+        updatedTokens.add(map);
+      }
+
+      lockedData['tokens'] = updatedTokens;
+      await SecureStorageService.setString(key, jsonEncode(lockedData));
+      return true;
+    } catch (e) {
+      print('[STORAGE] Error marking locked tokens as spent: $e');
+      return false;
+    }
+  }
+
   /// Remove tokens from storage (after successful transfer)
   static Future<bool> removeTokens(List<String> tokenIds) async {
     try {
@@ -358,6 +393,79 @@ class StorageService {
     } catch (e) {
       print('[STORAGE] Error adding tokens: $e');
       return false;
+    }
+  }
+
+  /// Add or update token records by token_id without duplicating existing entries.
+  static Future<bool> addOrUpdateTokens(List<Token> tokens) async {
+    try {
+      if (tokens.isEmpty) return true;
+
+      final existing = await getTokens();
+      final byId = <String, Token>{};
+
+      for (final token in existing) {
+        if (token.tokenId.isNotEmpty) {
+          byId[token.tokenId] = token;
+        }
+      }
+
+      for (final token in tokens) {
+        if (token.tokenId.isNotEmpty) {
+          byId[token.tokenId] = token;
+        }
+      }
+
+      final merged = byId.values.toList(growable: false);
+      final ok = await saveTokens(merged);
+      if (!ok) return false;
+
+      await saveBalance(merged.length);
+      return true;
+    } catch (e) {
+      print('[STORAGE] Error in addOrUpdateTokens: $e');
+      return false;
+    }
+  }
+
+  /// Get all locally stored LOCKED tokens for a specific transaction id.
+  static Future<List<Token>> getTokensByTxnId(String txnId) async {
+    try {
+      final expectedTxnId = txnId.trim();
+      if (expectedTxnId.isEmpty) return [];
+
+      final allTokens = await getTokens();
+      final matches = <Token>[];
+
+      for (final token in allTokens) {
+        final mutable = token.mutable;
+        final status = (mutable['status'] ?? '').toString().toUpperCase();
+
+        final lockInfo = mutable['lock_info'];
+        if (lockInfo is! Map) {
+          continue;
+        }
+
+        // Support both txn_id and txnId lock-info shapes.
+        final currentTxnId = (lockInfo['txn_id'] ?? lockInfo['txnId'] ?? '')
+            .toString()
+            .trim();
+
+        final isTxnMatch = currentTxnId == expectedTxnId;
+        final isLocked = status == 'LOCKED';
+
+        // Primary rule remains LOCKED + txn match.
+        // Fallback allows recovery from stale/legacy status while lock_info still exists.
+        if (isTxnMatch && (isLocked || status.isEmpty)) {
+          matches.add(token);
+        }
+      }
+
+      print('[STORAGE] getTokensByTxnId expected=$expectedTxnId total=${allTokens.length} matched=${matches.length}');
+      return matches;
+    } catch (e) {
+      print('[STORAGE] Error getting tokens by txnId: $e');
+      return [];
     }
   }
 }
