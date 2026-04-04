@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/utils/async_timing.dart';
@@ -8,6 +10,7 @@ import '../../balance/models/recharge_response.dart' show Token;
 import '../../balance/services/wallet_keypair_service.dart';
 import '../services/qr_unlock_flow_service.dart';
 import '../../balance/services/token_lock_service.dart';
+import '../../bluetooth/services/classic_bluetooth_service.dart';
 
 class AcceptPaymentQrScreen extends StatefulWidget {
   const AcceptPaymentQrScreen({super.key});
@@ -22,8 +25,12 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
   String? _qrPayload;
   String? _error;
   bool _didLoadArgs = false;
+  bool _didAutoOpenScanner = false;
   String? _expectedTxnId;
+  String? _senderName;
   List<Token>? _preloadedLockedTokens;
+  int? _connectionHandle;
+  final ClassicBluetoothService _classicService = ClassicBluetoothService();
 
   void _log(String message) {
     if (kDebugMode) {
@@ -44,6 +51,8 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
 
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     _expectedTxnId = args?['expectedTxnId'] as String?;
+    _senderName = args?['senderName'] as String?;
+    _connectionHandle = args?['connectionHandle'] as int?;
     final tokensArg = args?['lockedTokens'];
     if (tokensArg is List<Token>) {
       _preloadedLockedTokens = tokensArg;
@@ -54,6 +63,41 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
           .toList(growable: false);
     }
     _log('Screen initialized expectedTxnId=${_expectedTxnId ?? '-'}');
+
+    if (!_didAutoOpenScanner) {
+      _didAutoOpenScanner = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openQrScanner();
+      });
+    }
+  }
+
+  Future<void> _notifySenderTokenUnlocked(UnlockResult result) async {
+    final handle = _connectionHandle;
+    if (handle == null) {
+      _log('No connection handle available, skipping token_unlocked ack');
+      return;
+    }
+
+    final confirmation = {
+      'type': 'token_unlocked',
+      'txnId': result.txnId,
+      'status': 'success',
+      'message': 'Receiver scanned QR and unlocked tokens',
+      'tokenCount': result.tokenCount,
+      'amount': result.totalValue,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    await traceAwait(
+      '[ACCEPT-QR] ClassicBluetoothService.sendBytes token_unlocked',
+      _classicService.sendBytes(
+        handle,
+        Uint8List.fromList(utf8.encode(jsonEncode(confirmation))),
+      ),
+    );
+    _log('token_unlocked ack sent to sender');
   }
 
   Future<void> onQrScanned(String qrPayload) async {
@@ -66,26 +110,41 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     });
 
     try {
-      final myPubKey = await traceAwait('[ACCEPT-QR] _loadMyPublicKey preview', _loadMyPublicKey());
-      final preview = await traceAwait(
-        '[ACCEPT-QR] QrUnlockFlowService.buildPreview',
-        QrUnlockFlowService.buildPreview(
+      // Auto-unlock immediately after scan to remove extra confirmation step.
+      final myPubKey = await traceAwait('[ACCEPT-QR] _loadMyPublicKey unlock', _loadMyPublicKey());
+      final result = await traceAwait(
+        '[ACCEPT-QR] QrUnlockFlowService.confirmAndUnlock',
+        QrUnlockFlowService.confirmAndUnlock(
           qrPayload: qrPayload,
           myPubKey: myPubKey,
           preloadedLockedTokens: _preloadedLockedTokens,
         ),
       );
-      _log('Preview ready txnId=${preview.txnId}, tokens=${preview.tokenCount}, total=${preview.totalValue}');
 
-      if (_expectedTxnId != null && _expectedTxnId!.isNotEmpty && _expectedTxnId != preview.txnId) {
-        _log('Partial mismatch expectedTxnId=$_expectedTxnId scannedTxnId=${preview.txnId}');
+      if (_expectedTxnId != null &&
+          _expectedTxnId!.isNotEmpty &&
+          _expectedTxnId != result.txnId) {
+        _log('Partial mismatch expectedTxnId=$_expectedTxnId unlockedTxnId=${result.txnId}');
         throw const TokenLockException('Partial mismatch: QR txn_id does not match locked transfer');
       }
 
+      await _notifySenderTokenUnlocked(result);
+
       if (!mounted) return;
-      setState(() {
-        _preview = preview;
-      });
+      _log('Auto-unlock complete, ack sent, navigating to /transaction/result');
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/transaction/result',
+        (route) => false,
+        arguments: {
+          'amount': result.totalValue,
+          'otherPartyName': _senderName ?? 'Sender',
+          'txnId': result.txnId,
+          'method': 'QR Unlock',
+          'message': 'Payment received successfully',
+          'isReceiver': true,
+        },
+      );
     } on FormatException {
       _log('Invalid QR format');
       if (!mounted) return;
@@ -103,66 +162,6 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
       if (!mounted) return;
       setState(() {
         _error = 'Invalid QR';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isBusy = false;
-        });
-      }
-    }
-  }
-
-  Future<void> onConfirmUnlock() async {
-    if (_qrPayload == null) return;
-    _log('Confirm unlock tapped');
-
-    setState(() {
-      _isBusy = true;
-      _error = null;
-    });
-
-    try {
-      final myPubKey = await traceAwait('[ACCEPT-QR] _loadMyPublicKey unlock', _loadMyPublicKey());
-      final result = await traceAwait(
-        '[ACCEPT-QR] QrUnlockFlowService.confirmAndUnlock',
-        QrUnlockFlowService.confirmAndUnlock(
-          qrPayload: _qrPayload!,
-          myPubKey: myPubKey,
-          preloadedLockedTokens: _preloadedLockedTokens,
-        ),
-      );
-      _log('Unlock success txnId=${result.txnId}, tokens=${result.tokenCount}, total=${result.totalValue}');
-      for (final token in result.unlockedTokens) {
-        _log('Unlocked token tokenId=${token.tokenId}, value=${token.value}');
-      }
-
-      if (!mounted) return;
-      _log('Navigating to confirmation screen /transaction/result');
-      Navigator.pushNamedAndRemoveUntil(
-        context,
-        '/transaction/result',
-        (route) => false,
-        arguments: {
-          'amount': result.totalValue,
-          'otherPartyName': 'Sender',
-          'txnId': result.txnId,
-          'method': 'QR Unlock',
-          'message': 'Batch unlock successful (${result.tokenCount} tokens)',
-          'isReceiver': true,
-        },
-      );
-    } on TokenLockException catch (e) {
-      _log('Unlock failed: ${e.message}');
-      if (!mounted) return;
-      setState(() {
-        _error = e.message;
-      });
-    } catch (_) {
-      _log('Unlock failed: unknown error');
-      if (!mounted) return;
-      setState(() {
-        _error = 'Unable to unlock tokens';
       });
     } finally {
       if (mounted) {
@@ -250,6 +249,11 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
 
       if (!mounted || scannedPayload == null || scannedPayload.isEmpty) {
         _log('Scanner closed without payload');
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/home',
+          (route) => false,
+        );
         return;
       }
 
@@ -314,26 +318,24 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ElevatedButton(
-              onPressed: _isBusy
-                  ? null
-                  : _openQrScanner,
-              child: const Text('Scan QR'),
+            const SizedBox(height: 8),
+            const Text(
+              'Opening scanner...',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70),
             ),
-            if (_preview != null) ...[
+            if (_isBusy) ...[
               const SizedBox(height: 16),
-              Text('Tokens: ${_preview!.tokenCount}'),
-              Text('Total value: ${_preview!.totalValue}'),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: _isBusy ? null : onConfirmUnlock,
-                child: const Text('Confirm & Unlock'),
+              const Text(
+                'Processing unlock...',
+                textAlign: TextAlign.center,
               ),
             ],
             if (_error != null) ...[
               const SizedBox(height: 16),
               Text(
                 _error!,
+                textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.redAccent),
               ),
             ],

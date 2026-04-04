@@ -230,10 +230,9 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
               },
             );
           }
-        } else if (decoded['type'] == 'transfer_complete') {
-          // Receiver confirmed token receipt and verification
-          _log('[PAY-PENDING] Transfer complete, finalizing');
-          await traceAwait('[PAY-PENDING] _finalizeTransaction', _finalizeTransaction());
+        } else if (decoded['type'] == 'token_unlocked' || decoded['type'] == 'transfer_complete') {
+          // Receiver confirmed QR scan + unlock (or legacy transfer_complete compatibility)
+          _log('[PAY-PENDING] Receiver unlock confirmation received, navigating now and finalizing in background');
           
           _completed = true;
           final message = decoded['message'] as String? ?? 'Transfer successful';
@@ -251,6 +250,11 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
               'message': message,
               'isReceiver': false,
             },
+          );
+
+          // Run local cleanup after success UI transition to reduce perceived latency.
+          unawaited(
+            traceAwait('[PAY-PENDING] _finalizeTransaction background', _finalizeTransaction()),
           );
         } else if (decoded['type'] == 'transfer_cancelled_ack') {
           // Receiver acknowledged our cancellation

@@ -484,12 +484,9 @@ class _ReceiveBluetoothConnectedScreenState
       _tokensReceived = true;
       _receivedTxnId = txnId;
 
-      // Send confirmation to sender
-      await traceAwait('[RECEIVE-CONNECTED] _sendTransferComplete', _sendTransferComplete(txnId));
-
       setState(() {
         _isProcessing = false;
-        _statusMessage = 'Tokens received. Scan sender QR to unlock.';
+        _statusMessage = 'Locked tokens received. Scan sender QR and confirm unlock.';
       });
 
       // Check if cancelled before showing success
@@ -509,6 +506,7 @@ class _ReceiveBluetoothConnectedScreenState
             'senderName': _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
             'amount': amount,
             'lockedTokens': tokens,
+            'connectionHandle': _connectionHandle,
           },
         );
       }

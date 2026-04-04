@@ -14,12 +14,46 @@ class StorageService {
   static const String _freeTokensUsedKey = 'free_tokens_used';
   static const int _maxFreeTokens = 500;
 
+  // In-memory token cache to avoid repeated encrypted storage reads (very slow on Android)
+  static List<Token>? _cachedTokens;
+  static String? _cachedUserId;
+  
+  // Cached userId from TokenService to avoid repeated getUser() calls
+  static String? _currentUserId;
+
+  /// Invalidate token cache (call after any token modification)
+  static void _invalidateTokenCache() {
+    _cachedTokens = null;
+  }
+
+  /// Get current user ID (cached for session)
+  static Future<String> _getCachedUserId() async {
+    // Reuse cached userId if it exists
+    if (_currentUserId != null) {
+      return _currentUserId!;
+    }
+    // Fetch once and cache for entire session
+    final user = await TokenService.getUser();
+    _currentUserId = user?.id ?? 'guest';
+    return _currentUserId!;
+  }
+
+  /// Clear user ID cache on logout
+  static void _clearUserIdCache() {
+    _currentUserId = null;
+    _cachedTokens = null;
+    _cachedUserId = null;
+  }
+
   /// Get user-scoped storage key
   static Future<String> _getUserKey(String baseKey) async {
     final user = await TokenService.getUser();
     final userId = user?.id ?? 'guest';
     return '${userId}_$baseKey';
   }
+
+  /// Build user-scoped key from userId (no async call)
+  static String _buildUserKey(String userId, String baseKey) => '${userId}_$baseKey';
 
   static String _tokenStorageKey(String tokenId) => '${_tokenItemPrefix}_$tokenId';
 
@@ -92,28 +126,56 @@ class StorageService {
   /// Save tokens to storage
   static Future<bool> saveTokens(List<Token> tokens) async {
     try {
+      // Get cached userId (avoids costly TokenService.getUser() call)
+      final userId = await _getCachedUserId();
+
+      // Sort tokens by createdAt (oldest first) for consistent ordering
+      final sortedTokens = [...tokens];
+      sortedTokens.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
       // Store each token in a separate encrypted record for compartmentalization.
-      final previousIds = await _getTokenIds();
-      final nextIds = tokens.map((t) => t.tokenId).toSet().toList();
-
-      for (final token in tokens) {
-        final itemKey = await _getUserKey(_tokenStorageKey(token.tokenId));
-        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+      final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+      
+      List<String> previousIds = [];
+      if (indexRaw != null && indexRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(indexRaw) as List<dynamic>;
+          previousIds = decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } catch (_) {
+          previousIds = [];
+        }
       }
 
-      // Remove token records that are no longer part of the wallet state.
+      final nextIds = sortedTokens.map((t) => t.tokenId).toSet().toList();
+
+      // Save all tokens in parallel
+      final saveFutures = sortedTokens.map((token) {
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(token.tokenId));
+        return SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      });
+      await Future.wait(saveFutures);
+
+      // Remove token records that are no longer part of the wallet state (in parallel)
       final removedIds = previousIds.where((id) => !nextIds.contains(id));
-      for (final tokenId in removedIds) {
-        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
-        await SecureStorageService.remove(itemKey);
+      final deleteFutures = removedIds.map((tokenId) {
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(tokenId));
+        return SecureStorageService.remove(itemKey);
+      });
+      if (deleteFutures.isNotEmpty) {
+        await Future.wait(deleteFutures);
       }
 
-      await _saveTokenIds(nextIds);
+      // Update token index
+      await SecureStorageService.setString(tokenIndexKey, jsonEncode(nextIds));
 
       // Keep legacy aggregate key in sync for backward compatibility while migrating.
-      final legacyKey = await _getUserKey(_tokensKey);
-      final legacyList = tokens.map((token) => token.toJson()).toList();
+      final legacyKey = _buildUserKey(userId, _tokensKey);
+      final legacyList = sortedTokens.map((token) => token.toJson()).toList();
       await SecureStorageService.setString(legacyKey, jsonEncode(legacyList));
+
+      // Invalidate in-memory cache since we've modified tokens
+      _invalidateTokenCache();
 
       return true;
     } catch (e) {
@@ -121,18 +183,46 @@ class StorageService {
     }
   }
 
-  /// Get all tokens from storage
+  /// Get all tokens from storage (uses in-memory cache to avoid slow encrypted reads)
   static Future<List<Token>> getTokens() async {
     try {
+      // Get cached userId (avoids costly TokenService.getUser() call)
+      final userId = await _getCachedUserId();
+
+      // Return cached tokens if available and still valid for this user
+      if (_cachedTokens != null && _cachedUserId == userId) {
+        return _cachedTokens!;
+      }
+
       // Preferred path: read token index, then fetch each token record separately.
-      final tokenIds = await _getTokenIds();
+      final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+      final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+      
+      List<String> tokenIds = [];
+      if (indexRaw != null && indexRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(indexRaw) as List<dynamic>;
+          tokenIds = decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } catch (_) {
+          tokenIds = [];
+        }
+      }
+
       if (tokenIds.isNotEmpty) {
+        // Build all token storage keys without additional async calls
+        final itemKeys = tokenIds
+            .map((tokenId) => _buildUserKey(userId, _tokenStorageKey(tokenId)))
+            .toList();
+
+        // Fetch all token records in parallel
+        final rawFutures = itemKeys.map((key) => SecureStorageService.getString(key));
+        final rawValues = await Future.wait(rawFutures);
+
         final tokens = <Token>[];
         final validIds = <String>[];
 
-        for (final tokenId in tokenIds) {
-          final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
-          final raw = await SecureStorageService.getString(itemKey);
+        for (int i = 0; i < tokenIds.length; i++) {
+          final raw = rawValues[i];
           if (raw == null || raw.isEmpty) {
             continue;
           }
@@ -148,16 +238,24 @@ class StorageService {
           }
         }
 
+        // Sort tokens by createdAt for consistent ordering
+        tokens.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
         // Compact index if some token records were missing/corrupted.
         if (validIds.length != tokenIds.length) {
-          await _saveTokenIds(validIds);
+          final nextKey = _buildUserKey(userId, _tokenIndexKey);
+          await SecureStorageService.setString(nextKey, jsonEncode(validIds));
         }
+
+        // Cache the result for subsequent calls
+        _cachedTokens = tokens;
+        _cachedUserId = userId;
 
         return tokens;
       }
 
       // Fallback path for legacy storage where tokens were a single JSON array.
-      final legacyKey = await _getUserKey(_tokensKey);
+      final legacyKey = _buildUserKey(userId, _tokensKey);
       final jsonString = await SecureStorageService.getString(legacyKey);
       if (jsonString == null || jsonString.isEmpty) return [];
 
@@ -199,16 +297,51 @@ class StorageService {
   /// Clear all wallet data
   static Future<bool> clearWalletData() async {
     try {
-      await SecureStorageService.remove(await _getUserKey(_balanceKey));
-      await SecureStorageService.remove(await _getUserKey(_tokensKey));
-      final tokenIds = await _getTokenIds();
-      for (final tokenId in tokenIds) {
-        await SecureStorageService.remove(await _getUserKey(_tokenStorageKey(tokenId)));
+      // Get cached userId (avoids costly TokenService.getUser() call)
+      final userId = await _getCachedUserId();
+
+      // Build all keys without additional async calls
+      final balanceKey = _buildUserKey(userId, _balanceKey);
+      final tokensKey = _buildUserKey(userId, _tokensKey);
+      final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+      final totalTokensKey = _buildUserKey(userId, _totalTokensKey);
+      final freeTokensUsedKey = _buildUserKey(userId, _freeTokensUsedKey);
+      final lockedTokensKey = _buildUserKey(userId, _lockedTokensKey);
+
+      // Get token IDs to delete individual token records
+      final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+      List<String> tokenIds = [];
+      if (indexRaw != null && indexRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(indexRaw) as List<dynamic>;
+          tokenIds = decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } catch (_) {
+          tokenIds = [];
+        }
       }
-      await SecureStorageService.remove(await _getUserKey(_tokenIndexKey));
-      await SecureStorageService.remove(await _getUserKey(_totalTokensKey));
-      await SecureStorageService.remove(await _getUserKey(_freeTokensUsedKey));
-      await SecureStorageService.remove(await _getUserKey(_lockedTokensKey));
+
+      // Build all delete futures in parallel
+      final deleteFutures = <Future>[
+        SecureStorageService.remove(balanceKey),
+        SecureStorageService.remove(tokensKey),
+        SecureStorageService.remove(tokenIndexKey),
+        SecureStorageService.remove(totalTokensKey),
+        SecureStorageService.remove(freeTokensUsedKey),
+        SecureStorageService.remove(lockedTokensKey),
+      ];
+      
+      // Add individual token deletions
+      for (final tokenId in tokenIds) {
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(tokenId));
+        deleteFutures.add(SecureStorageService.remove(itemKey));
+      }
+
+      // Execute all deletions in parallel
+      await Future.wait(deleteFutures);
+      
+      // Invalidate in-memory cache
+      _invalidateTokenCache();
+      
       return true;
     } catch (e) {
       return false;
@@ -233,6 +366,11 @@ class StorageService {
     } catch (e) {
       return _maxFreeTokens;
     }
+  }
+
+  /// Call this on logout to clear all caches
+  static void clearSessionCaches() {
+    _clearUserIdCache();
   }
 
   /// Check if free tokens are exhausted
@@ -263,16 +401,12 @@ class StorageService {
     }
   }
 
-  /// Get unused tokens sorted by creation date (oldest first)
+  /// Get unused tokens (already sorted by creation date - oldest first)
   static Future<List<Token>> getUnusedTokens(int count) async {
     try {
       final allTokens = await getTokens();
+      // Tokens are stored in sorted order by createdAt, so just filter and take
       final unusedTokens = allTokens.where((t) => !t.used).toList();
-      
-      // Sort by createdAt (oldest first)
-      unusedTokens.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      
-      // Return requested count
       return unusedTokens.take(count).toList();
     } catch (e) {
       print('[STORAGE] Error getting unused tokens: $e');
@@ -436,23 +570,47 @@ class StorageService {
         return await getBalance();
       }
 
-      final existingIds = await _getTokenIds();
+      // Get cached userId (avoids costly TokenService.getUser() call)
+      final userId = await _getCachedUserId();
+
+      final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+      final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+      
+      List<String> existingIds = [];
+      if (indexRaw != null && indexRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(indexRaw) as List<dynamic>;
+          existingIds = decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } catch (_) {
+          existingIds = [];
+        }
+      }
+
       final nextIds = <String>{...existingIds};
       var appendedCount = 0;
 
+      // Save all new tokens in parallel
+      final saveFutures = <Future>[];
       for (final token in tokens) {
         final tokenId = token.tokenId;
         if (tokenId.isEmpty || nextIds.contains(tokenId)) {
           continue;
         }
 
-        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
-        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(tokenId));
+        saveFutures.add(SecureStorageService.setString(itemKey, jsonEncode(token.toJson())));
         nextIds.add(tokenId);
         appendedCount++;
       }
 
-      await _saveTokenIds(nextIds.toList(growable: false));
+      if (saveFutures.isNotEmpty) {
+        await Future.wait(saveFutures);
+      }
+
+      await SecureStorageService.setString(tokenIndexKey, jsonEncode(nextIds.toList(growable: false)));
+
+      // Invalidate cache since we've added tokens
+      _invalidateTokenCache();
 
       final currentBalance = await getBalance();
       final nextBalance = currentBalance + appendedCount;
@@ -471,24 +629,41 @@ class StorageService {
     try {
       if (tokens.isEmpty) return true;
 
-      for (final token in tokens) {
-        final tokenId = token.tokenId;
-        if (tokenId.isEmpty) {
-          continue;
-        }
+      // Get cached userId (avoids costly TokenService.getUser() call)
+      final userId = await _getCachedUserId();
 
-        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
-        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+      final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+      
+      List<String> existingIds = [];
+      if (indexRaw != null && indexRaw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(indexRaw) as List<dynamic>;
+          existingIds = decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } catch (_) {
+          existingIds = [];
+        }
       }
 
-      final existingIds = await _getTokenIds();
+      // Update all tokens in parallel
+      final updateFutures = tokens.where((t) => t.tokenId.isNotEmpty).map((token) {
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(token.tokenId));
+        return SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      });
+      if (updateFutures.isNotEmpty) {
+        await Future.wait(updateFutures);
+      }
+
       final nextIds = <String>{...existingIds};
       for (final token in tokens) {
         if (token.tokenId.isNotEmpty) {
           nextIds.add(token.tokenId);
         }
       }
-      await _saveTokenIds(nextIds.toList(growable: false));
+      await SecureStorageService.setString(tokenIndexKey, jsonEncode(nextIds.toList(growable: false)));
+
+      // Invalidate cache since we've modified tokens
+      _invalidateTokenCache();
 
       return true;
     } catch (e) {
