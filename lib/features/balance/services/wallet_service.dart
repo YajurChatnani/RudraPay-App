@@ -6,7 +6,6 @@ import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../core/services/token_service.dart';
 import '../models/recharge_response.dart';
-import 'token_verification_service.dart';
 import 'wallet_keypair_service.dart';
 
 class WalletService {
@@ -39,7 +38,7 @@ class WalletService {
         headers['x-auth-token'] = jwt;
       }
 
-      // Verify every received token and re-request only missing count.
+      // Token verification is temporarily disabled to reduce recharge latency.
       final verifiedTokens = <Token>[];
       final seenTokenIds = <String>{};
       var remaining = amount;
@@ -69,16 +68,8 @@ class WalletService {
           }
         }
 
-        final verificationResults = await TokenVerificationService.verifyTokens(incomingTokens);
-
         for (var i = 0; i < incomingTokens.length; i++) {
           final token = incomingTokens[i];
-          final result = verificationResults[i];
-
-          if (!result.isValid) {
-            // Invalid token is intentionally dropped and re-requested in next loop.
-            continue;
-          }
 
           if (seenTokenIds.contains(token.tokenId)) {
             // Duplicate token should not be counted twice.
@@ -94,7 +85,7 @@ class WalletService {
 
       if (remaining > 0) {
         throw AppException.server(
-          'Could not verify all tokens. Verified ${verifiedTokens.length} of $amount.',
+          'Could not receive all tokens. Loaded ${verifiedTokens.length} of $amount.',
         );
       }
 

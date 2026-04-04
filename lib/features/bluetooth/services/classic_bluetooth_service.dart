@@ -161,8 +161,6 @@ class ClassicBluetoothService {
         print('Pairing attempt: $e');
       }
 
-      await Future.delayed(const Duration(milliseconds: 300));
-
       // Native connect via method channel (registers socket handle for sendBytes)
       final result = await platform.invokeMethod<Map>('connect', {
         'uuid': _sppUuid,

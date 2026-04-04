@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/recharge_response.dart';
 import '../services/storage_service.dart';
+import '../../../core/utils/async_timing.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../../features/home/screens/home_screen.dart';
 
@@ -32,20 +33,17 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
   }
 
   Future<void> _saveTokensAndBalance() async {
-    // Merge newly recharged tokens with existing wallet state.
-    final saved = await StorageService.addOrUpdateTokens(widget.response.tokens);
-    if (!saved) {
+    // Fast append newly recharged tokens without scanning the entire wallet.
+    final newBalance = await traceAwait('[RECHARGE] StorageService.appendTokensFast', StorageService.appendTokensFast(widget.response.tokens));
+    if (newBalance < 0) {
       print('[RECHARGE] Failed to persist recharged tokens');
       return;
     }
-
-    // Read final balance from storage after merge-write.
-    final newBalance = await StorageService.getBalance();
     print('[RECHARGE] Persisted tokens=${widget.response.tokens.length}, balance=$newBalance');
 
     // Save total tokens received
-    final currentTotal = await StorageService.getTotalTokensReceived();
-    await StorageService.saveTotalTokensReceived(currentTotal + widget.response.totalTokens);
+    final currentTotal = await traceAwait('[RECHARGE] StorageService.getTotalTokensReceived', StorageService.getTotalTokensReceived());
+    await traceAwait('[RECHARGE] StorageService.saveTotalTokensReceived', StorageService.saveTotalTokensReceived(currentTotal + widget.response.totalTokens));
 
     // Create a settled transaction for server-added balance
     try {
@@ -53,12 +51,15 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
       final txnId = 'recharge_${DateTime.now().millisecondsSinceEpoch}';
       
       // Save as SETTLED transaction (credit from server, not awaiting settlement)
-      await TransactionStorageService.saveSettledTransaction(
-        txnId: txnId,
-        amount: widget.response.totalTokens,
-        type: 'credit',
-        merchant: 'RudraPay Server',
-        timestamp: DateTime.now().toIso8601String(),
+      await traceAwait(
+        '[RECHARGE] TransactionStorageService.saveSettledTransaction',
+        TransactionStorageService.saveSettledTransaction(
+          txnId: txnId,
+          amount: widget.response.totalTokens,
+          type: 'credit',
+          merchant: 'RudraPay Server',
+          timestamp: DateTime.now().toIso8601String(),
+        ),
       );
       print('[RECHARGE] Created settled transaction for server balance addition');
     } catch (e) {
@@ -265,7 +266,9 @@ class _RechargeResultScreenState extends State<RechargeResultScreen> {
                             Navigator.pushReplacement(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const HomeScreen(),
+                                builder: (context) => HomeScreen(
+                                  initialBalance: _newBalance,
+                                ),
                               ),
                             );
                           },

@@ -428,6 +428,75 @@ class StorageService {
     }
   }
 
+  /// Fast path for appending brand-new tokens without scanning the entire wallet.
+  /// This is intended for recharge flows where tokens are newly minted.
+  static Future<int> appendTokensFast(List<Token> tokens) async {
+    try {
+      if (tokens.isEmpty) {
+        return await getBalance();
+      }
+
+      final existingIds = await _getTokenIds();
+      final nextIds = <String>{...existingIds};
+      var appendedCount = 0;
+
+      for (final token in tokens) {
+        final tokenId = token.tokenId;
+        if (tokenId.isEmpty || nextIds.contains(tokenId)) {
+          continue;
+        }
+
+        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
+        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+        nextIds.add(tokenId);
+        appendedCount++;
+      }
+
+      await _saveTokenIds(nextIds.toList(growable: false));
+
+      final currentBalance = await getBalance();
+      final nextBalance = currentBalance + appendedCount;
+      await saveBalance(nextBalance);
+
+      return nextBalance;
+    } catch (e) {
+      print('[STORAGE] Error in appendTokensFast: $e');
+      return await getBalance();
+    }
+  }
+
+  /// Fast path for updating already-known token records without loading the wallet.
+  /// This is intended for unlock flows where the token ids already exist locally.
+  static Future<bool> overwriteTokensFast(List<Token> tokens) async {
+    try {
+      if (tokens.isEmpty) return true;
+
+      for (final token in tokens) {
+        final tokenId = token.tokenId;
+        if (tokenId.isEmpty) {
+          continue;
+        }
+
+        final itemKey = await _getUserKey(_tokenStorageKey(tokenId));
+        await SecureStorageService.setString(itemKey, jsonEncode(token.toJson()));
+      }
+
+      final existingIds = await _getTokenIds();
+      final nextIds = <String>{...existingIds};
+      for (final token in tokens) {
+        if (token.tokenId.isNotEmpty) {
+          nextIds.add(token.tokenId);
+        }
+      }
+      await _saveTokenIds(nextIds.toList(growable: false));
+
+      return true;
+    } catch (e) {
+      print('[STORAGE] Error in overwriteTokensFast: $e');
+      return false;
+    }
+  }
+
   /// Get all locally stored LOCKED tokens for a specific transaction id.
   static Future<List<Token>> getTokensByTxnId(String txnId) async {
     try {

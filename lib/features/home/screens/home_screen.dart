@@ -1,6 +1,7 @@
 // Purpose: Home dashboard showing wallet summary, recent activity, and manual sync actions.
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../core/utils/async_timing.dart';
 import '../../balance/services/storage_service.dart';
 import '../../transactions/services/transaction_sync_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
@@ -8,7 +9,9 @@ import '../../../core/services/token_service.dart';
 import '../../../core/models/user_model.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final int? initialBalance;
+
+  const HomeScreen({super.key, this.initialBalance});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,7 +31,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadBalance();
+    _balance = widget.initialBalance ?? 0;
+    if (widget.initialBalance == null) {
+      _loadBalance();
+    }
     _loadUser();
     _loadRecentTransactions();
     _startSyncTimeUpdateTimer();
@@ -52,14 +58,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadBalance() async {
-    final balance = await StorageService.getBalance();
+    final balance = await traceAwait('[HOME] StorageService.getBalance', StorageService.getBalance());
     setState(() {
       _balance = balance;
     });
   }
 
   Future<void> _loadUser() async {
-    final user = await TokenService.getUser();
+    final user = await traceAwait('[HOME] TokenService.getUser', TokenService.getUser());
     setState(() {
       _user = user;
     });
@@ -67,8 +73,8 @@ class _HomeScreenState extends State<HomeScreen> {
   
   Future<void> _loadRecentTransactions() async {
     try {
-      final unsettled = await TransactionStorageService.getUnsettledTransactions();
-      final settled = await TransactionStorageService.getSettledTransactions();
+      final unsettled = await traceAwait('[HOME] TransactionStorageService.getUnsettledTransactions', TransactionStorageService.getUnsettledTransactions());
+      final settled = await traceAwait('[HOME] TransactionStorageService.getSettledTransactions', TransactionStorageService.getSettledTransactions());
       
       // Combine and sort by timestamp (most recent first)
       final allTransactions = [...unsettled, ...settled];
@@ -100,12 +106,12 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final success = await TransactionSyncService.syncTransactions();
+      final success = await traceAwait('[HOME] TransactionSyncService.syncTransactions', TransactionSyncService.syncTransactions());
       
       if (success && mounted) {
         // Reload balance and transactions
-        await _loadBalance();
-        await _loadRecentTransactions();
+        await traceAwait('[HOME] _loadBalance after sync', _loadBalance());
+        await traceAwait('[HOME] _loadRecentTransactions after sync', _loadRecentTransactions());
         
         // Show success toast
         ScaffoldMessenger.of(context).showSnackBar(
@@ -121,8 +127,8 @@ class _HomeScreenState extends State<HomeScreen> {
       
       // Even if sync failed, still reload in case reconciliation succeeded
       if (mounted) {
-        await _loadBalance();
-        await _loadRecentTransactions();
+        await traceAwait('[HOME] _loadBalance after sync failure', _loadBalance());
+        await traceAwait('[HOME] _loadRecentTransactions after sync failure', _loadRecentTransactions());
       }
       
       if (mounted) {

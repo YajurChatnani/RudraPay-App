@@ -1,6 +1,7 @@
 // Purpose: Transactions list UI for browsing settled and unsettled records.
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/utils/async_timing.dart';
 import '../services/transaction_storage_service.dart';
 
 class TransactionsListScreen extends StatefulWidget {
@@ -22,8 +23,8 @@ class _TransactionsListScreenState extends State<TransactionsListScreen> {
 
   Future<void> _loadTransactions() async {
     try {
-      final unsettled = await TransactionStorageService.getUnsettledTransactions();
-      final settled = await TransactionStorageService.getSettledTransactions();
+      final unsettled = await traceAwait('[TRANSACTIONS] TransactionStorageService.getUnsettledTransactions', TransactionStorageService.getUnsettledTransactions());
+      final settled = await traceAwait('[TRANSACTIONS] TransactionStorageService.getSettledTransactions', TransactionStorageService.getSettledTransactions());
       
       // Combine and sort by timestamp (most recent first)
       final allTransactions = [...unsettled, ...settled];

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../../../core/utils/async_timing.dart';
 import '../../bluetooth/services/classic_bluetooth_service.dart';
 import '../../balance/services/storage_service.dart';
 import '../../balance/services/token_lock_service.dart';
@@ -176,7 +177,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
                     }).toList();
 
                     // Re-lock with correct receiver public key
-                    final senderKeyPair = await WalletKeyPairService.getOrCreateKeyPair();
+                    final senderKeyPair = await traceAwait('[PAY-PENDING] WalletKeyPairService.getOrCreateKeyPair', WalletKeyPairService.getOrCreateKeyPair());
                     final relockResult = TokenLockService.lockTokens(
                       tokens: tokensToRelock,
                       senderPrivKey: senderKeyPair.privateKeyPem,
@@ -205,11 +206,11 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
                   _status = 'Sending tokens...';
                 });
                 
-                await _sendTokens();
+                await traceAwait('[PAY-PENDING] _sendTokens', _sendTokens());
               } else {
                 // Receiver rejected - unlock tokens and revert
                 _log('[PAY-PENDING] Receiver rejected, reverting transaction');
-                await _revertTransaction();
+                await traceAwait('[PAY-PENDING] _revertTransaction after reject', _revertTransaction());
                 
                 _completed = true;
                 final message = decoded['message'] as String? ?? 'Payment rejected by receiver';
@@ -232,7 +233,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
         } else if (decoded['type'] == 'transfer_complete') {
           // Receiver confirmed token receipt and verification
           _log('[PAY-PENDING] Transfer complete, finalizing');
-          await _finalizeTransaction();
+          await traceAwait('[PAY-PENDING] _finalizeTransaction', _finalizeTransaction());
           
           _completed = true;
           final message = decoded['message'] as String? ?? 'Transfer successful';
@@ -288,7 +289,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       _log('[PAY-PENDING] Stream error occurred');
       
       // Revert transaction on connection error
-      await _revertTransaction();
+      await traceAwait('[PAY-PENDING] _revertTransaction after stream error', _revertTransaction());
       
       _completed = true;
       if (!mounted) return;
@@ -326,13 +327,16 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
 
       // Send tokens
       _log('[PAY-PENDING] Sending token transfer payload');
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(utf8.encode(jsonEncode(tokenTransfer))),
+      await traceAwait(
+        '[PAY-PENDING] ClassicBluetoothService.sendBytes token_transfer',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(utf8.encode(jsonEncode(tokenTransfer))),
+        ),
       );
 
       if (_txnId != null) {
-        await StorageService.markLockedTokensAsSpent(_txnId!);
+        await traceAwait('[PAY-PENDING] StorageService.markLockedTokensAsSpent', StorageService.markLockedTokensAsSpent(_txnId!));
       }
       _log('[PAY-PENDING] Token transfer payload sent');
       
@@ -344,7 +348,7 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       });
     } catch (e) {
       _log('[PAY-PENDING] Error sending tokens');
-      await _revertTransaction();
+      await traceAwait('[PAY-PENDING] _revertTransaction after send failure', _revertTransaction());
       
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(
@@ -392,12 +396,12 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       // Remove tokens from sender storage
       if (_tokens != null) {
         final tokenIds = _tokens!.map((t) => t.tokenId).toList();
-        await StorageService.removeTokens(tokenIds);
+        await traceAwait('[PAY-PENDING] StorageService.removeTokens', StorageService.removeTokens(tokenIds));
         _log('[PAY-PENDING] Updated sender token storage after transfer');
       }
 
       // Unlock (clear lock)
-      await StorageService.unlockTokens();
+      await traceAwait('[PAY-PENDING] StorageService.unlockTokens finalize', StorageService.unlockTokens());
       _log('[PAY-PENDING] Token lock released');
 
       // Transaction remains as unsettled - will be settled when online sync happens
@@ -410,12 +414,12 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
   Future<void> _revertTransaction() async {
     try {
       // Unlock tokens (make them available again)
-      await StorageService.unlockTokens();
+      await traceAwait('[PAY-PENDING] StorageService.unlockTokens revert', StorageService.unlockTokens());
       _log('[PAY-PENDING] Token lock released');
 
       // Remove unsettled transaction
       if (_txnId != null) {
-        await TransactionStorageService.removeUnsettledTransaction(_txnId!);
+        await traceAwait('[PAY-PENDING] TransactionStorageService.removeUnsettledTransaction', TransactionStorageService.removeUnsettledTransaction(_txnId!));
         _log('[PAY-PENDING] Removed unsettled transaction');
       }
 
@@ -438,45 +442,48 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
     }
 
     // Show confirmation dialog only during \"Waiting for receiver\" phase
-    final shouldCancel = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Cancel Transfer?',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        ),
-        content: const Text(
-          'Cancelling will abort the transfer and notify the receiver.',
-          style: TextStyle(color: Colors.white70, fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep Transferring'),
+    final shouldCancel = await traceAwait(
+      '[PAY-PENDING] showDialog cancel transfer',
+      showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Cancel Transfer?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Cancel Transfer',
-              style: TextStyle(color: Color(0xFFE8FF3C)),
+          content: const Text(
+            'Cancelling will abort the transfer and notify the receiver.',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Transferring'),
             ),
-          ),
-        ],
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Cancel Transfer',
+                style: TextStyle(color: Color(0xFFE8FF3C)),
+              ),
+            ),
+          ],
+        ),
       ),
     ) ?? false;
 
     if (shouldCancel) {
       // Send cancellation message to receiver
-      await _sendCancellationMessage();
+      await traceAwait('[PAY-PENDING] _sendCancellationMessage', _sendCancellationMessage());
       
       // Revert transaction
-      await _revertTransaction();
+      await traceAwait('[PAY-PENDING] _revertTransaction after cancel', _revertTransaction());
       
       // Disconnect
-      await _classicService.disconnect();
+      await traceAwait('[PAY-PENDING] ClassicBluetoothService.disconnect', _classicService.disconnect());
       
       _log('[PAY-PENDING] Transaction cancelled by user');
       
@@ -503,10 +510,13 @@ class _TransferPendingScreenState extends State<TransferPendingScreen>
       
       _log('[PAY-PENDING] Sending cancellation message');
       
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(
-          utf8.encode(jsonEncode(cancelMessage)),
+      await traceAwait(
+        '[PAY-PENDING] ClassicBluetoothService.sendBytes transfer_cancelled',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(
+            utf8.encode(jsonEncode(cancelMessage)),
+          ),
         ),
       );
       

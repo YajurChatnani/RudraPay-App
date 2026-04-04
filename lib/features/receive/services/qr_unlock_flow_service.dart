@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/utils/async_timing.dart';
 import '../../balance/models/recharge_response.dart';
 import '../../balance/models/transaction_bundle.dart';
 import '../../balance/services/storage_service.dart';
@@ -35,6 +36,13 @@ class UnlockResult {
 }
 
 class QrUnlockFlowService {
+  static final Map<String, List<Token>> _validatedTokenCache = <String, List<Token>>{};
+
+  static void cacheLockedTokens(String txnId, List<Token> tokens) {
+    if (txnId.trim().isEmpty || tokens.isEmpty) return;
+    _validatedTokenCache[txnId.trim()] = List<Token>.unmodifiable(tokens);
+  }
+
   static void _log(String message) {
     if (kDebugMode) {
       debugPrint('[QR-UNLOCK] $message');
@@ -44,11 +52,20 @@ class QrUnlockFlowService {
   static Future<UnlockPreview> buildPreview({
     required String qrPayload,
     required String myPubKey,
+    List<Token>? preloadedLockedTokens,
   }) async {
     _log('buildPreview started');
     final bundle = TokenLockService.parseQrPayload(qrPayload);
     _log('Parsed QR bundle txnId=${bundle.txnId}, keys=${bundle.unlockKeys.length}');
-    final lockedTokens = await _loadAndValidateLockedTokens(bundle, myPubKey);
+    final lockedTokens = await traceAwait(
+      '[QR-UNLOCK] _loadAndValidateLockedTokens preview',
+      _loadAndValidateLockedTokens(
+        bundle,
+        myPubKey,
+        preloadedLockedTokens: preloadedLockedTokens,
+      ),
+    );
+    cacheLockedTokens(bundle.txnId, lockedTokens);
     _log('Loaded and validated locked tokens count=${lockedTokens.length}');
 
     final totalValue = lockedTokens.fold<int>(0, (sum, token) {
@@ -68,11 +85,20 @@ class QrUnlockFlowService {
   static Future<UnlockResult> confirmAndUnlock({
     required String qrPayload,
     required String myPubKey,
+    List<Token>? preloadedLockedTokens,
   }) async {
     _log('confirmAndUnlock started');
     final bundle = TokenLockService.parseQrPayload(qrPayload);
     _log('Parsed QR bundle for unlock txnId=${bundle.txnId}');
-    final lockedTokens = await _loadAndValidateLockedTokens(bundle, myPubKey);
+    final cachedTokens = _validatedTokenCache.remove(bundle.txnId);
+    final List<Token> lockedTokens = cachedTokens ?? await traceAwait<List<Token>>(
+      '[QR-UNLOCK] _loadAndValidateLockedTokens unlock',
+      _loadAndValidateLockedTokens(
+        bundle,
+        myPubKey,
+        preloadedLockedTokens: preloadedLockedTokens,
+      ),
+    );
     _log('Validated locked tokens before unlock count=${lockedTokens.length}');
 
     final unlocked = TokenLockService.unlockTransaction(
@@ -85,7 +111,7 @@ class QrUnlockFlowService {
       _log('Unlocked token tokenId=${token.tokenId}, value=${token.value}, status=${token.mutable['status']}');
     }
 
-    final persisted = await StorageService.addOrUpdateTokens(unlocked);
+    final persisted = await traceAwait('[QR-UNLOCK] StorageService.overwriteTokensFast', StorageService.overwriteTokensFast(unlocked));
     if (!persisted) {
       _log('Persistence failed for unlocked tokens');
       throw const TokenLockException('Failed to persist unlocked tokens');
@@ -106,9 +132,11 @@ class QrUnlockFlowService {
   static Future<List<Token>> _loadAndValidateLockedTokens(
     TransactionBundle bundle,
     String myPubKey,
+    {List<Token>? preloadedLockedTokens}
   ) async {
     _log('Loading locked tokens for txnId=${bundle.txnId}');
-    final lockedTokens = await StorageService.getTokensByTxnId(bundle.txnId);
+    final cachedTokens = preloadedLockedTokens ?? _validatedTokenCache[bundle.txnId];
+    final List<Token> lockedTokens = cachedTokens ?? await traceAwait<List<Token>>('[QR-UNLOCK] StorageService.getTokensByTxnId', StorageService.getTokensByTxnId(bundle.txnId));
     if (lockedTokens.isEmpty) {
       _log('No locked tokens found for txnId=${bundle.txnId}');
       throw const TokenLockException('Token not found for txn_id');

@@ -3,11 +3,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import '../../../core/utils/async_timing.dart';
 import '../../../core/services/token_service.dart';
 import '../../balance/services/storage_service.dart';
 import '../../balance/services/wallet_keypair_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../balance/models/recharge_response.dart';
+import '../../receive/services/qr_unlock_flow_service.dart';
 import '../services/classic_bluetooth_service.dart';
 
 class ReceiveBluetoothConnectedScreen extends StatefulWidget {
@@ -63,10 +65,10 @@ class _ReceiveBluetoothConnectedScreenState
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     
     // Get user info
-    final user = await TokenService.getUser();
+    final user = await traceAwait('[RECEIVE-CONNECTED] TokenService.getUser', TokenService.getUser());
 
     // Fallback to local device name if none passed
-    final fallbackDeviceName = await ClassicBluetoothService.getDeviceName();
+    final fallbackDeviceName = await traceAwait('[RECEIVE-CONNECTED] ClassicBluetoothService.getDeviceName', ClassicBluetoothService.getDeviceName());
 
     setState(() {
       _deviceName = args?['deviceName'] ?? args?['connectionAddress'] ?? fallbackDeviceName;
@@ -171,7 +173,7 @@ class _ReceiveBluetoothConnectedScreenState
                 
                 try {
                   // Get the transaction details to know how many tokens to remove
-                  final unsettledTxns = await TransactionStorageService.getUnsettledTransactions();
+                  final unsettledTxns = await traceAwait('[RECEIVE-CONNECTED] TransactionStorageService.getUnsettledTransactions', TransactionStorageService.getUnsettledTransactions());
                   final txnToRevert = unsettledTxns.firstWhere(
                     (t) => t['txnId'] == _receivedTxnId,
                     orElse: () => <String, dynamic>{},
@@ -181,17 +183,17 @@ class _ReceiveBluetoothConnectedScreenState
                     final amount = txnToRevert['amount'] as int;
                     
                     // Get current tokens
-                    final currentTokens = await StorageService.getTokens();
+                    final currentTokens = await traceAwait('[RECEIVE-CONNECTED] StorageService.getTokens', StorageService.getTokens());
                     if (currentTokens.length >= amount) {
                       // Remove the last 'amount' tokens (the ones we just added)
                       final tokensToRemove = currentTokens.sublist(currentTokens.length - amount);
                       final tokenIdsToRemove = tokensToRemove.map((t) => t.tokenId).toList();
-                      await StorageService.removeTokens(tokenIdsToRemove);
+                      await traceAwait('[RECEIVE-CONNECTED] StorageService.removeTokens revert', StorageService.removeTokens(tokenIdsToRemove));
                       print('[RECEIVE-CONNECTED] Reverted $amount tokens');
                     }
                     
                     // Delete the unsettled transaction
-                    await TransactionStorageService.removeUnsettledTransaction(_receivedTxnId!);
+                    await traceAwait('[RECEIVE-CONNECTED] TransactionStorageService.removeUnsettledTransaction', TransactionStorageService.removeUnsettledTransaction(_receivedTxnId!));
                     print('[RECEIVE-CONNECTED] Deleted unsettled transaction: $_receivedTxnId');
                   }
                 } catch (e) {
@@ -210,9 +212,12 @@ class _ReceiveBluetoothConnectedScreenState
                   'tokensReverted': _tokensReceived,
                   'timestamp': DateTime.now().toIso8601String(),
                 };
-                await _classicService.sendBytes(
-                  _connectionHandle!,
-                  Uint8List.fromList(utf8.encode(jsonEncode(ackMsg))),
+                await traceAwait(
+                  '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes transfer_cancelled_ack',
+                  _classicService.sendBytes(
+                    _connectionHandle!,
+                    Uint8List.fromList(utf8.encode(jsonEncode(ackMsg))),
+                  ),
                 );
                 print('[RECEIVE-CONNECTED] Cancellation ack sent (tokens reverted: $_tokensReceived)');
               } catch (e) {
@@ -220,7 +225,7 @@ class _ReceiveBluetoothConnectedScreenState
               }
               
               // Disconnect and navigate to fail screen
-              await _classicService.disconnect();
+              await traceAwait('[RECEIVE-CONNECTED] ClassicBluetoothService.disconnect after cancel', _classicService.disconnect());
               
               if (!mounted) return;
               Navigator.pushNamedAndRemoveUntil(
@@ -370,12 +375,15 @@ class _ReceiveBluetoothConnectedScreenState
       }
 
       // Send response to sender
-      await _sendResponseToSender(
-        accepted: accepted,
-        request: request,
-        message: accepted 
-            ? 'Payment accepted, awaiting tokens...' 
-            : 'Payment rejected by receiver',
+      await traceAwait(
+        '[RECEIVE-CONNECTED] _sendResponseToSender',
+        _sendResponseToSender(
+          accepted: accepted,
+          request: request,
+          message: accepted 
+              ? 'Payment accepted, awaiting tokens...' 
+              : 'Payment rejected by receiver',
+        ),
       );
 
       if (accepted) {
@@ -388,7 +396,7 @@ class _ReceiveBluetoothConnectedScreenState
         // Show rejection message
         _showInfo('Payment rejected');
         
-        await Future.delayed(const Duration(seconds: 2));
+        await traceAwait('[RECEIVE-CONNECTED] Future.delayed rejection cooldown', Future.delayed(const Duration(seconds: 2)));
         
         if (mounted) {
           Navigator.of(context).pushNamedAndRemoveUntil(
@@ -449,30 +457,26 @@ class _ReceiveBluetoothConnectedScreenState
       }
 
       setState(() {
-        _statusMessage = 'Verifying tokens...';
+        _statusMessage = 'Saving tokens...';
       });
 
-      final persisted = await StorageService.addOrUpdateTokens(tokens);
-      if (!persisted) {
+        final newBalance = await traceAwait('[RECEIVE-CONNECTED] StorageService.appendTokensFast', StorageService.appendTokensFast(tokens));
+        if (newBalance < 0) {
         throw Exception('Failed to persist locked tokens on receiver');
       }
-      final byTxn = await StorageService.getTokensByTxnId(txnId);
-      print('[RECEIVE-CONNECTED] Stored ${tokens.length} locked tokens for QR unlock; queryByTxn=${byTxn.length}');
-      for (final token in byTxn) {
-        final lockInfo = token.mutable['lock_info'];
-        final expiry = lockInfo is Map ? (lockInfo['lock_expiry'] ?? '').toString() : '';
-        print(
-          '[RECEIVE-CONNECTED] Locked token in storage: tokenId=${token.tokenId}, value=${token.value}, txn_id=$txnId, lock_expiry=$expiry',
-        );
-      }
+      print('[RECEIVE-CONNECTED] Stored ${tokens.length} locked tokens for QR unlock');
+      QrUnlockFlowService.cacheLockedTokens(txnId, tokens);
 
       // Save as unsettled transaction (credit for receiver)
-      await TransactionStorageService.saveUnsettledTransaction(
-        txnId: txnId,
-        amount: amount,
-        type: 'credit',
-        merchant: _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
-        timestamp: timestamp ?? DateTime.now().toIso8601String(),
+      await traceAwait(
+        '[RECEIVE-CONNECTED] TransactionStorageService.saveUnsettledTransaction',
+        TransactionStorageService.saveUnsettledTransaction(
+          txnId: txnId,
+          amount: amount,
+          type: 'credit',
+          merchant: _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
+          timestamp: timestamp ?? DateTime.now().toIso8601String(),
+        ),
       );
       print('[RECEIVE-CONNECTED] Saved unsettled transaction');
       
@@ -481,7 +485,7 @@ class _ReceiveBluetoothConnectedScreenState
       _receivedTxnId = txnId;
 
       // Send confirmation to sender
-      await _sendTransferComplete(txnId);
+      await traceAwait('[RECEIVE-CONNECTED] _sendTransferComplete', _sendTransferComplete(txnId));
 
       setState(() {
         _isProcessing = false;
@@ -504,6 +508,7 @@ class _ReceiveBluetoothConnectedScreenState
             'expectedTxnId': txnId,
             'senderName': _incomingRequest?['senderName'] ?? _deviceName ?? 'Sender',
             'amount': amount,
+            'lockedTokens': tokens,
           },
         );
       }
@@ -516,9 +521,12 @@ class _ReceiveBluetoothConnectedScreenState
       });
       
       // Send error response
-      await _sendTransferError(
-        _incomingRequest?['txnId'] as String?,
-        'Token verification failed: $e',
+      await traceAwait(
+        '[RECEIVE-CONNECTED] _sendTransferError',
+        _sendTransferError(
+          _incomingRequest?['txnId'] as String?,
+          'Token verification failed: $e',
+        ),
       );
       
       _showError('Token transfer failed: $e');
@@ -539,7 +547,7 @@ class _ReceiveBluetoothConnectedScreenState
       // Get receiver's public key to send to sender
       String? receiverPubKey;
       try {
-        final keyPair = await WalletKeyPairService.getOrCreateKeyPair();
+        final keyPair = await traceAwait('[RECEIVE-CONNECTED] WalletKeyPairService.getOrCreateKeyPair', WalletKeyPairService.getOrCreateKeyPair());
         receiverPubKey = keyPair.publicKeyPem;
       } catch (e) {
         print('[RECEIVE-CONNECTED WARN] Failed to load receiver public key: $e');
@@ -556,9 +564,12 @@ class _ReceiveBluetoothConnectedScreenState
       };
 
       print('[RECEIVE-CONNECTED] Sending response with receiverPubKey: $response');
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(utf8.encode(jsonEncode(response))),
+      await traceAwait(
+        '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes payment_response',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(utf8.encode(jsonEncode(response))),
+        ),
       );
       print('[RECEIVE-CONNECTED] Response sent');
     } catch (e) {
@@ -578,9 +589,12 @@ class _ReceiveBluetoothConnectedScreenState
       };
 
       print('[RECEIVE-CONNECTED] Sending transfer complete confirmation');
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(utf8.encode(jsonEncode(confirmation))),
+      await traceAwait(
+        '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes transfer_complete',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(utf8.encode(jsonEncode(confirmation))),
+        ),
       );
       print('[RECEIVE-CONNECTED] Confirmation sent');
     } catch (e) {
@@ -600,9 +614,12 @@ class _ReceiveBluetoothConnectedScreenState
       };
 
       print('[RECEIVE-CONNECTED] Sending transfer error');
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(utf8.encode(jsonEncode(errorResponse))),
+      await traceAwait(
+        '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes transfer_error',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(utf8.encode(jsonEncode(errorResponse))),
+        ),
       );
     } catch (e) {
       print('[RECEIVE-CONNECTED ERROR] Failed to send error: $e');
@@ -654,33 +671,36 @@ class _ReceiveBluetoothConnectedScreenState
   /// Handle back button press during receive
   Future<bool> _onWillPop() async {
     // Show confirmation dialog
-    final shouldCancel = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Stop Receiving?',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        ),
-        content: const Text(
-          'Leaving will close the connection and cancel any pending transfers.',
-          style: TextStyle(color: Colors.white70, fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep Waiting'),
+    final shouldCancel = await traceAwait(
+      '[RECEIVE-CONNECTED] showDialog stop receiving',
+      showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Stop Receiving?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Stop Receiving',
-              style: TextStyle(color: Color(0xFFE8FF3C)),
+          content: const Text(
+            'Leaving will close the connection and cancel any pending transfers.',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Waiting'),
             ),
-          ),
-        ],
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Stop Receiving',
+                style: TextStyle(color: Color(0xFFE8FF3C)),
+              ),
+            ),
+          ],
+        ),
       ),
     ) ?? false;
 
@@ -690,7 +710,7 @@ class _ReceiveBluetoothConnectedScreenState
       
       // If we have an incoming request, send cancellation acknowledgment
       if (_incomingRequest != null) {
-        await _sendCancellationAcknowledgment();
+        await traceAwait('[RECEIVE-CONNECTED] _sendCancellationAcknowledgment', _sendCancellationAcknowledgment());
         
         // Navigate to fail screen with cancellation message
         if (!mounted) return true;
@@ -709,7 +729,7 @@ class _ReceiveBluetoothConnectedScreenState
         );
       } else {
         // No active transaction, just disconnect
-        await _classicService.disconnect();
+        await traceAwait('[RECEIVE-CONNECTED] ClassicBluetoothService.disconnect stop receiving', _classicService.disconnect());
         print('[RECEIVE-CONNECTED] Stopped receiving by user');
         
         if (!mounted) return true;
@@ -717,7 +737,7 @@ class _ReceiveBluetoothConnectedScreenState
       }
       
       // Disconnect
-      await _classicService.disconnect();
+      await traceAwait('[RECEIVE-CONNECTED] ClassicBluetoothService.disconnect final', _classicService.disconnect());
     }
 
     return false; // Prevent back navigation if not cancelled
@@ -739,10 +759,13 @@ class _ReceiveBluetoothConnectedScreenState
       
       print('[RECEIVE-CONNECTED] Sending cancellation acknowledgment: $ackMessage');
       
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(
-          utf8.encode(jsonEncode(ackMessage)),
+      await traceAwait(
+        '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes transfer_cancelled_ack',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(
+            utf8.encode(jsonEncode(ackMessage)),
+          ),
         ),
       );
       

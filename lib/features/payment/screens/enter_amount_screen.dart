@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/utils/async_timing.dart';
 import '../../balance/services/storage_service.dart';
 import '../../transactions/services/transaction_storage_service.dart';
 import '../../bluetooth/services/classic_bluetooth_service.dart';
@@ -48,7 +49,7 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
       _connectionAddress = args?['connectionAddress'] as String?;
     });
 
-    final balance = await StorageService.getBalance();
+    final balance = await traceAwait('[ENTER-AMOUNT] StorageService.getBalance', StorageService.getBalance());
     if (mounted) {
       setState(() {
         _availableBalance = balance;
@@ -83,11 +84,11 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
       print('[ENTER-AMOUNT] Starting token transfer: $amt tokens');
       
       // Get user info
-      final user = await TokenService.getUser();
+      final user = await traceAwait('[ENTER-AMOUNT] TokenService.getUser', TokenService.getUser());
       final senderName = user?.name ?? _userName;
       
       // Select tokens (oldest first, unused only)
-      final tokensToSend = await StorageService.getUnusedTokens(amt);
+      final tokensToSend = await traceAwait('[ENTER-AMOUNT] StorageService.getUnusedTokens', StorageService.getUnusedTokens(amt));
       
       if (tokensToSend.length < amt) {
         if (mounted) {
@@ -112,7 +113,7 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
 
       print('[ENTER-AMOUNT] Generated txnId: $txnId');
 
-      final senderKeyPair = await WalletKeyPairService.getOrCreateKeyPair();
+      final senderKeyPair = await traceAwait('[ENTER-AMOUNT] WalletKeyPairService.getOrCreateKeyPair', WalletKeyPairService.getOrCreateKeyPair());
       final receiverPubKey = (_connectionAddress ?? _deviceName).toString();
       final lockResult = TokenLockService.lockTokens(
         tokens: tokensToSend,
@@ -122,16 +123,19 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
       );
 
       // Lock tokens for transfer
-      await StorageService.lockTokens(txnId, lockResult.updatedTokens);
+      await traceAwait('[ENTER-AMOUNT] StorageService.lockTokens', StorageService.lockTokens(txnId, lockResult.updatedTokens));
       print('[ENTER-AMOUNT] Locked $amt tokens');
 
       // Save as unsettled transaction (debit for sender)
-      await TransactionStorageService.saveUnsettledTransaction(
-        txnId: txnId,
-        amount: amt,
-        type: 'debit',
-        merchant: _deviceName,
-        timestamp: timestamp,
+      await traceAwait(
+        '[ENTER-AMOUNT] TransactionStorageService.saveUnsettledTransaction',
+        TransactionStorageService.saveUnsettledTransaction(
+          txnId: txnId,
+          amount: amt,
+          type: 'debit',
+          merchant: _deviceName,
+          timestamp: timestamp,
+        ),
       );
       print('[ENTER-AMOUNT] Saved unsettled transaction');
 
@@ -146,9 +150,12 @@ class _EnterAmountScreenState extends State<EnterAmountScreen> {
 
       // Send payment request
       print('[ENTER-AMOUNT] Sending payment request...');
-      await _classicService.sendBytes(
-        _connectionHandle!,
-        Uint8List.fromList(utf8.encode(jsonEncode(paymentRequest))),
+      await traceAwait(
+        '[ENTER-AMOUNT] ClassicBluetoothService.sendBytes payment_request',
+        _classicService.sendBytes(
+          _connectionHandle!,
+          Uint8List.fromList(utf8.encode(jsonEncode(paymentRequest))),
+        ),
       );
       print('[ENTER-AMOUNT] Payment request sent');
 

@@ -3,6 +3,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/utils/async_timing.dart';
+import '../../balance/models/recharge_response.dart' show Token;
 import '../../balance/services/wallet_keypair_service.dart';
 import '../services/qr_unlock_flow_service.dart';
 import '../../balance/services/token_lock_service.dart';
@@ -21,6 +23,7 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
   String? _error;
   bool _didLoadArgs = false;
   String? _expectedTxnId;
+  List<Token>? _preloadedLockedTokens;
 
   void _log(String message) {
     if (kDebugMode) {
@@ -29,7 +32,7 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
   }
 
   Future<String> _loadMyPublicKey() async {
-    final keyPair = await WalletKeyPairService.getOrCreateKeyPair();
+    final keyPair = await traceAwait('[ACCEPT-QR] WalletKeyPairService.getOrCreateKeyPair', WalletKeyPairService.getOrCreateKeyPair());
     return keyPair.publicKeyPem;
   }
 
@@ -41,6 +44,15 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
 
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     _expectedTxnId = args?['expectedTxnId'] as String?;
+    final tokensArg = args?['lockedTokens'];
+    if (tokensArg is List<Token>) {
+      _preloadedLockedTokens = tokensArg;
+    } else if (tokensArg is List) {
+      _preloadedLockedTokens = tokensArg
+          .whereType<Map<String, dynamic>>()
+          .map(Token.fromJson)
+          .toList(growable: false);
+    }
     _log('Screen initialized expectedTxnId=${_expectedTxnId ?? '-'}');
   }
 
@@ -54,10 +66,14 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     });
 
     try {
-      final myPubKey = await _loadMyPublicKey();
-      final preview = await QrUnlockFlowService.buildPreview(
-        qrPayload: qrPayload,
-        myPubKey: myPubKey,
+      final myPubKey = await traceAwait('[ACCEPT-QR] _loadMyPublicKey preview', _loadMyPublicKey());
+      final preview = await traceAwait(
+        '[ACCEPT-QR] QrUnlockFlowService.buildPreview',
+        QrUnlockFlowService.buildPreview(
+          qrPayload: qrPayload,
+          myPubKey: myPubKey,
+          preloadedLockedTokens: _preloadedLockedTokens,
+        ),
       );
       _log('Preview ready txnId=${preview.txnId}, tokens=${preview.tokenCount}, total=${preview.totalValue}');
 
@@ -107,10 +123,14 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     });
 
     try {
-      final myPubKey = await _loadMyPublicKey();
-      final result = await QrUnlockFlowService.confirmAndUnlock(
-        qrPayload: _qrPayload!,
-        myPubKey: myPubKey,
+      final myPubKey = await traceAwait('[ACCEPT-QR] _loadMyPublicKey unlock', _loadMyPublicKey());
+      final result = await traceAwait(
+        '[ACCEPT-QR] QrUnlockFlowService.confirmAndUnlock',
+        QrUnlockFlowService.confirmAndUnlock(
+          qrPayload: _qrPayload!,
+          myPubKey: myPubKey,
+          preloadedLockedTokens: _preloadedLockedTokens,
+        ),
       );
       _log('Unlock success txnId=${result.txnId}, tokens=${result.tokenCount}, total=${result.totalValue}');
       for (final token in result.unlockedTokens) {
@@ -154,7 +174,7 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
   }
 
   Future<void> _openQrScanner() async {
-    final hasPermission = await _ensureCameraPermission();
+    final hasPermission = await traceAwait('[ACCEPT-QR] _ensureCameraPermission', _ensureCameraPermission());
     if (!hasPermission) {
       return;
     }
@@ -169,60 +189,63 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     var didScan = false;
 
     try {
-      final scannedPayload = await showDialog<String>(
-        context: context,
-        barrierDismissible: true,
-        builder: (dialogContext) {
-          return Dialog(
-            backgroundColor: const Color(0xFF111111),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'Scan Unlock QR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: 280,
-                    height: 280,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: MobileScanner(
-                        controller: controller,
-                        onDetect: (capture) {
-                          if (didScan) return;
-
-                          final barcodes = capture.barcodes;
-                          if (barcodes.isEmpty) return;
-
-                          final rawValue = barcodes.first.rawValue;
-                          if (rawValue == null || rawValue.isEmpty) return;
-
-                          didScan = true;
-                          _log('Camera detected QR code, closing scanner dialog');
-                          Navigator.of(dialogContext).pop(rawValue);
-                        },
+      final scannedPayload = await traceAwait(
+        '[ACCEPT-QR] showDialog scanner',
+        showDialog<String>(
+          context: context,
+          barrierDismissible: true,
+          builder: (dialogContext) {
+            return Dialog(
+              backgroundColor: const Color(0xFF111111),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Scan Unlock QR',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: 280,
+                      height: 280,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: MobileScanner(
+                          controller: controller,
+                          onDetect: (capture) {
+                            if (didScan) return;
+
+                            final barcodes = capture.barcodes;
+                            if (barcodes.isEmpty) return;
+
+                            final rawValue = barcodes.first.rawValue;
+                            if (rawValue == null || rawValue.isEmpty) return;
+
+                            didScan = true;
+                            _log('Camera detected QR code, closing scanner dialog');
+                            Navigator.of(dialogContext).pop(rawValue);
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
 
       if (!mounted || scannedPayload == null || scannedPayload.isEmpty) {
@@ -230,15 +253,15 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
         return;
       }
 
-      await onQrScanned(scannedPayload);
+      await traceAwait('[ACCEPT-QR] onQrScanned', onQrScanned(scannedPayload));
     } finally {
       _log('Disposing scanner controller');
-      await controller.dispose();
+      await traceAwait('[ACCEPT-QR] MobileScannerController.dispose', controller.dispose());
     }
   }
 
   Future<bool> _ensureCameraPermission() async {
-    var status = await Permission.camera.status;
+    var status = await traceAwait('[ACCEPT-QR] Permission.camera.status', Permission.camera.status);
 
     if (status.isGranted) {
       _log('Camera permission already granted');
@@ -246,7 +269,7 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     }
 
     _log('Requesting camera permission');
-    status = await Permission.camera.request();
+    status = await traceAwait('[ACCEPT-QR] Permission.camera.request', Permission.camera.request());
 
     if (status.isGranted) {
       _log('Camera permission granted after request');
