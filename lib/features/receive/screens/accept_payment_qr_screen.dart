@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/utils/async_timing.dart';
@@ -21,8 +20,6 @@ class AcceptPaymentQrScreen extends StatefulWidget {
 
 class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
   bool _isBusy = false;
-  UnlockPreview? _preview;
-  String? _qrPayload;
   String? _error;
   bool _didLoadArgs = false;
   bool _didAutoOpenScanner = false;
@@ -105,8 +102,6 @@ class _AcceptPaymentQrScreenState extends State<AcceptPaymentQrScreen> {
     setState(() {
       _isBusy = true;
       _error = null;
-      _preview = null;
-      _qrPayload = qrPayload;
     });
 
     try {

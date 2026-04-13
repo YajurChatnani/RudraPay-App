@@ -9,6 +9,8 @@ class TokenService {
   static const String _userKey = 'auth_user';
   static const String _refreshTokenKey = 'refresh_token';
   static const String _userIdKey = 'user_id';
+  static User? _cachedUser;
+  static String? _cachedUserJson;
 
   static Future<void> saveSession(String token, User user) async {
     // User object is serialized before persisting.
@@ -18,6 +20,8 @@ class TokenService {
     await SecureStorageService.setString(_tokenKey, token);
     await SecureStorageService.setString(_userKey, userJson);
     await SecureStorageService.setString(_userIdKey, user.id);
+    _cachedUser = user;
+    _cachedUserJson = userJson;
   }
 
   static Future<String?> getToken() async {
@@ -25,13 +29,25 @@ class TokenService {
   }
 
   static Future<User?> getUser() async {
+    if (_cachedUser != null) {
+      return _cachedUser;
+    }
+
     // Read encrypted user payload and deserialize it back into User model.
     final jsonString = await SecureStorageService.getString(_userKey);
 
     if (jsonString == null) return null;
+
+    if (_cachedUserJson != null && _cachedUserJson == jsonString && _cachedUser != null) {
+      return _cachedUser;
+    }
+
     try {
       final data = jsonDecode(jsonString) as Map<String, dynamic>;
-      return User.fromJson(data);
+      final user = User.fromJson(data);
+      _cachedUser = user;
+      _cachedUserJson = jsonString;
+      return user;
     } catch (e) {
       _log('Failed to parse stored user data. Clearing corrupted session user data.');
       _log('User parse error type: ${e.runtimeType}');
@@ -39,6 +55,8 @@ class TokenService {
       try {
         await SecureStorageService.remove(_userKey);
         await SecureStorageService.remove(_userIdKey);
+        _cachedUser = null;
+        _cachedUserJson = null;
       } catch (cleanupError) {
         _log('Failed to clear corrupted user data.');
         _log('Cleanup error type: ${cleanupError.runtimeType}');
@@ -64,6 +82,8 @@ class TokenService {
     await SecureStorageService.remove(_userKey);
     await SecureStorageService.remove(_refreshTokenKey);
     await SecureStorageService.remove(_userIdKey);
+    _cachedUser = null;
+    _cachedUserJson = null;
   }
 
   // Legacy helpers kept for compatibility

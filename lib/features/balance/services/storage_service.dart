@@ -57,22 +57,22 @@ class StorageService {
 
   static String _tokenStorageKey(String tokenId) => '${_tokenItemPrefix}_$tokenId';
 
-  static Future<List<String>> _getTokenIds() async {
-    final key = await _getUserKey(_tokenIndexKey);
-    final raw = await SecureStorageService.getString(key);
-    if (raw == null || raw.isEmpty) return [];
+  static Future<List<String>> _readTokenIndexForUser(String userId) async {
+    final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+    final indexRaw = await SecureStorageService.getString(tokenIndexKey);
+    if (indexRaw == null || indexRaw.isEmpty) return [];
 
     try {
-      final decoded = jsonDecode(raw) as List<dynamic>;
+      final decoded = jsonDecode(indexRaw) as List<dynamic>;
       return decoded.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
     } catch (_) {
       return [];
     }
   }
 
-  static Future<void> _saveTokenIds(List<String> tokenIds) async {
-    final key = await _getUserKey(_tokenIndexKey);
-    await SecureStorageService.setString(key, jsonEncode(tokenIds));
+  static Future<void> _writeTokenIndexForUser(String userId, List<String> tokenIds) async {
+    final tokenIndexKey = _buildUserKey(userId, _tokenIndexKey);
+    await SecureStorageService.setString(tokenIndexKey, jsonEncode(tokenIds));
   }
 
   /// Get current balance from storage
@@ -404,8 +404,37 @@ class StorageService {
   /// Get unused tokens (already sorted by creation date - oldest first)
   static Future<List<Token>> getUnusedTokens(int count) async {
     try {
+      if (count <= 0) return [];
+
+      final userId = await _getCachedUserId();
+      final tokenIds = await _readTokenIndexForUser(userId);
+
+      // Fast path: scan token index in order and stop as soon as enough unused tokens are found.
+      if (tokenIds.isNotEmpty) {
+        final selected = <Token>[];
+        for (final tokenId in tokenIds) {
+          final itemKey = _buildUserKey(userId, _tokenStorageKey(tokenId));
+          final raw = await SecureStorageService.getString(itemKey);
+          if (raw == null || raw.isEmpty) continue;
+
+          try {
+            final map = jsonDecode(raw) as Map<String, dynamic>;
+            final token = Token.fromJson(map);
+            if (!token.used) {
+              selected.add(token);
+              if (selected.length >= count) {
+                return selected;
+              }
+            }
+          } catch (_) {
+            // Ignore malformed token records and continue scanning.
+          }
+        }
+
+        return selected;
+      }
+
       final allTokens = await getTokens();
-      // Tokens are stored in sorted order by createdAt, so just filter and take
       final unusedTokens = allTokens.where((t) => !t.used).toList();
       return unusedTokens.take(count).toList();
     } catch (e) {
@@ -495,16 +524,42 @@ class StorageService {
   /// Remove tokens from storage (after successful transfer)
   static Future<bool> removeTokens(List<String> tokenIds) async {
     try {
-      final allTokens = await getTokens();
-      final remainingTokens = allTokens
-          .where((t) => !tokenIds.contains(t.tokenId))
-          .toList();
-      
-      await saveTokens(remainingTokens);
-      
-      // Update balance to match token count
-      await saveBalance(remainingTokens.length);
-      
+      if (tokenIds.isEmpty) return true;
+
+      final userId = await _getCachedUserId();
+      final currentIds = await _readTokenIndexForUser(userId);
+      if (currentIds.isEmpty) {
+        final allTokens = await getTokens();
+        final remainingTokens = allTokens
+            .where((t) => !tokenIds.contains(t.tokenId))
+            .toList();
+        await saveTokens(remainingTokens);
+        await saveBalance(remainingTokens.length);
+        return true;
+      }
+
+      final removeSet = tokenIds.toSet();
+      final remainingIds = currentIds.where((id) => !removeSet.contains(id)).toList(growable: false);
+
+      // Delete removed token records in parallel.
+      final deleteFutures = tokenIds.map((tokenId) {
+        final itemKey = _buildUserKey(userId, _tokenStorageKey(tokenId));
+        return SecureStorageService.remove(itemKey);
+      });
+      await Future.wait(deleteFutures);
+
+      await _writeTokenIndexForUser(userId, remainingIds);
+      await saveBalance(remainingIds.length);
+
+      // Keep in-memory cache coherent without forcing a full read.
+      if (_cachedUserId == userId && _cachedTokens != null) {
+        _cachedTokens = _cachedTokens!
+            .where((t) => !removeSet.contains(t.tokenId))
+            .toList(growable: false);
+      } else {
+        _invalidateTokenCache();
+      }
+
       return true;
     } catch (e) {
       print('[STORAGE] Error removing tokens: $e');

@@ -575,31 +575,6 @@ class _ReceiveBluetoothConnectedScreenState
     }
   }
 
-  Future<void> _sendTransferComplete(String txnId) async {
-    try {
-      if (_connectionHandle == null) return;
-
-      final confirmation = {
-        'type': 'transfer_complete',
-        'txnId': txnId,
-        'status': 'success',
-        'message': 'Tokens received and verified',
-      };
-
-      print('[RECEIVE-CONNECTED] Sending transfer complete confirmation');
-      await traceAwait(
-        '[RECEIVE-CONNECTED] ClassicBluetoothService.sendBytes transfer_complete',
-        _classicService.sendBytes(
-          _connectionHandle!,
-          Uint8List.fromList(utf8.encode(jsonEncode(confirmation))),
-        ),
-      );
-      print('[RECEIVE-CONNECTED] Confirmation sent');
-    } catch (e) {
-      print('[RECEIVE-CONNECTED ERROR] Failed to send confirmation: $e');
-    }
-  }
-
   Future<void> _sendTransferError(String? txnId, String error) async {
     try {
       if (_connectionHandle == null) return;
